@@ -1,0 +1,28 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  body {
+    @apply bg-stone-50 text-stone-900 dark:bg-zinc-950 dark:text-zinc-100 font-sans antialiased min-h-screen selection:bg-amber-500/30 selection:text-amber-200 transition-colors duration-300;
+  }
+}
+
+/* Scrollbar أنيق */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: #09090b;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
