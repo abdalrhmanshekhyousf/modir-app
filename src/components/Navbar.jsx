@@ -39,14 +39,14 @@ export default function Navbar({
 
   return (
     <header className="sticky top-0 z-50 w-full transition-colors duration-300 border-b bg-stone-100/90 dark:bg-zinc-950/90 backdrop-blur-xl border-stone-200/80 dark:border-zinc-800/80 shadow-sm">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16 gap-2 sm:gap-4">
+      <div className="max-w-7xl mx-auto px-2.5 sm:px-4 lg:px-8">
+        <div className="flex items-center justify-between h-16 gap-2">
           
           {/* الشعار واسم النظام */}
-          <div className="flex items-center gap-2 sm:gap-2.5">
+          <div className="flex items-center gap-2 shrink-0">
             <div className="relative group cursor-pointer">
               <div className="absolute -inset-0.5 bg-gradient-to-r from-amber-500 to-orange-500 rounded-2xl blur opacity-30 group-hover:opacity-75 transition duration-300"></div>
-              <div className="relative p-2 sm:p-2.5 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-500 text-zinc-950 font-black shadow-md">
+              <div className="relative p-2 rounded-xl sm:rounded-2xl bg-gradient-to-br from-amber-400 to-amber-500 text-zinc-950 font-black shadow-md">
                 <Store className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
             </div>
@@ -55,7 +55,7 @@ export default function Navbar({
                 <span className="font-black text-xs sm:text-sm tracking-wide text-stone-900 dark:text-zinc-100">
                   نظام المبيعات
                 </span>
-                <Sparkles className="w-3 h-3 text-amber-500" />
+                <Sparkles className="w-3 h-3 text-amber-500 hidden xs:inline" />
               </div>
               <span className="text-[9px] sm:text-[10px] font-bold text-stone-500 dark:text-zinc-400">
                 إدارة الفواتير والتقارير
@@ -72,26 +72,26 @@ export default function Navbar({
                 <button
                   key={item.id}
                   onClick={() => handleTabChange(item.id)}
-                  className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-black transition-all duration-200 cursor-pointer ${
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-black transition-all duration-200 cursor-pointer ${
                     isActive
                       ? 'bg-amber-500 text-zinc-950 shadow-md shadow-amber-500/20 scale-[1.02]'
                       : 'text-stone-600 dark:text-zinc-400 hover:text-stone-900 dark:hover:text-zinc-100 hover:bg-stone-300/40 dark:hover:bg-zinc-800/50'
                   }`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <Icon className="w-4 h-4 shrink-0" />
                   <span>{item.label}</span>
                 </button>
               );
             })}
           </nav>
 
-          {/* الأدوات: سعر الصرف، العملة، والثيم */}
+          {/* الأدوات: سعر الصرف، العملة، والثيم، وقائمة الجوال */}
           <div className="flex items-center gap-1.5 sm:gap-2">
             
             {/* حقل تعديل سعر الصرف */}
-            <div className="flex items-center gap-1 px-2 py-1 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-[11px] sm:text-xs font-black shadow-sm">
+            <div className="flex items-center gap-1 px-2 py-1.5 rounded-xl sm:rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-[10px] sm:text-xs font-black shadow-sm">
               <RefreshCw className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin-slow shrink-0" />
-              <span className="hidden lg:inline whitespace-nowrap">1$ =</span>
+              <span className="hidden sm:inline whitespace-nowrap">1$ =</span>
               {isEditingRate ? (
                 <input
                   type="number"
@@ -100,18 +100,18 @@ export default function Navbar({
                   onBlur={() => setIsEditingRate(false)}
                   onKeyDown={(e) => e.key === 'Enter' && setIsEditingRate(false)}
                   autoFocus
-                  className="w-16 sm:w-20 px-1 py-0.5 rounded-lg bg-stone-100 dark:bg-zinc-900 border border-amber-500 text-center font-bold focus:outline-none"
+                  className="w-14 sm:w-20 px-1 py-0.5 rounded-lg bg-stone-100 dark:bg-zinc-900 border border-amber-500 text-center font-bold focus:outline-none"
                 />
               ) : (
                 <span
                   onClick={() => setIsEditingRate(true)}
                   title="انقر لتعديل سعر الصرف يدوياً"
-                  className="cursor-pointer hover:underline underline-offset-2 font-black text-stone-900 dark:text-zinc-100 px-1"
+                  className="cursor-pointer hover:underline underline-offset-2 font-black text-stone-900 dark:text-zinc-100 px-0.5"
                 >
                   {exchangeRate?.toLocaleString()}
                 </span>
               )}
-              <span className="text-[10px] sm:text-xs">ل.س</span>
+              <span className="text-[9px] sm:text-[10px]">ل.س</span>
             </div>
 
             {/* زر تبديل العملة */}
@@ -119,17 +119,17 @@ export default function Navbar({
               <button
                 onClick={toggleCurrency}
                 title="تبديل عرض العملة"
-                className="flex items-center gap-1 px-2.5 py-2 rounded-2xl bg-stone-200/80 dark:bg-zinc-900 text-stone-800 dark:text-zinc-200 hover:text-amber-500 border border-stone-300/60 dark:border-zinc-800/80 text-xs font-black transition-all cursor-pointer active:scale-95 shadow-sm"
+                className="flex items-center gap-1 px-2 py-2 rounded-xl sm:rounded-2xl bg-stone-200/80 dark:bg-zinc-900 text-stone-800 dark:text-zinc-200 hover:text-amber-500 border border-stone-300/60 dark:border-zinc-800/80 text-[11px] sm:text-xs font-black transition-all cursor-pointer active:scale-95 shadow-sm"
               >
                 {currency === 'USD' ? (
                   <>
-                    <DollarSign className="w-3.5 h-3.5 text-emerald-500" />
-                    <span>USD</span>
+                    <DollarSign className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                    <span className="hidden xs:inline">USD</span>
                   </>
                 ) : (
                   <>
-                    <Coins className="w-3.5 h-3.5 text-amber-500" />
-                    <span>SYP</span>
+                    <Coins className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    <span className="hidden xs:inline">SYP</span>
                   </>
                 )}
               </button>
@@ -141,7 +141,7 @@ export default function Navbar({
               onClick={() => setDarkMode(!darkMode)}
               title={darkMode ? "التحويل للوضع الفاتح" : "التحويل للوضع الداكن"}
               aria-label="Toggle Theme"
-              className="p-2 sm:p-2.5 rounded-2xl bg-stone-200/80 dark:bg-zinc-900 text-stone-700 dark:text-zinc-300 hover:text-amber-500 dark:hover:text-amber-400 border border-stone-300/60 dark:border-zinc-800/80 active:scale-90 transition-all cursor-pointer shadow-sm"
+              className="p-2 rounded-xl sm:rounded-2xl bg-stone-200/80 dark:bg-zinc-900 text-stone-700 dark:text-zinc-300 hover:text-amber-500 dark:hover:text-amber-400 border border-stone-300/60 dark:border-zinc-800/80 active:scale-90 transition-all cursor-pointer shadow-sm"
             >
               {darkMode ? (
                 <Sun className="w-4 h-4 text-amber-400 transition-transform hover:rotate-90" />
@@ -153,9 +153,10 @@ export default function Navbar({
             {/* زر القائمة للشاشات الصغيرة */}
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="md:hidden p-2 rounded-2xl bg-stone-200/80 dark:bg-zinc-900 text-stone-700 dark:text-zinc-300 border border-stone-300/60 dark:border-zinc-800/80 cursor-pointer"
+              aria-label="Toggle Mobile Menu"
+              className="md:hidden p-2 rounded-xl bg-stone-200/80 dark:bg-zinc-900 text-stone-700 dark:text-zinc-300 border border-stone-300/60 dark:border-zinc-800/85 cursor-pointer active:scale-90 transition-all"
             >
-              {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              {isMobileMenuOpen ? <X className="w-5 h-5 text-amber-500" /> : <Menu className="w-5 h-5" />}
             </button>
 
           </div>
@@ -164,7 +165,7 @@ export default function Navbar({
 
       {/* القائمة المنسدلة للجوال */}
       {isMobileMenuOpen && (
-        <div className="md:hidden border-t border-stone-200/80 dark:border-zinc-800/80 bg-stone-100/95 dark:bg-zinc-950/95 backdrop-blur-2xl p-3 space-y-1.5 shadow-xl">
+        <div className="md:hidden border-t border-stone-200/80 dark:border-zinc-800/80 bg-stone-100/95 dark:bg-zinc-950/95 backdrop-blur-2xl p-3 space-y-1.5 shadow-2xl animate-fadeIn">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -172,13 +173,13 @@ export default function Navbar({
               <button
                 key={item.id}
                 onClick={() => handleTabChange(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-black transition-all ${
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-black transition-all ${
                   isActive
-                    ? 'bg-amber-500 text-zinc-950 shadow-md'
-                    : 'text-stone-600 dark:text-zinc-400 hover:bg-stone-200/60 dark:hover:bg-zinc-900'
+                    ? 'bg-amber-500 text-zinc-950 shadow-md shadow-amber-500/20'
+                    : 'text-stone-700 dark:text-zinc-300 hover:bg-stone-200/60 dark:hover:bg-zinc-900'
                 }`}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className="w-4 h-4 shrink-0" />
                 <span>{item.label}</span>
               </button>
             );

@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
+
 // ⚠️ استبدل القيم أدناه ببيانات مشروعك من لوحة تحكم Firebase Console
 const firebaseConfig = {
    apiKey: "AIzaSyDcqhLwFenNNAj50G-SsYvP7sZeTtKpwgE",
@@ -18,11 +19,12 @@ const firebaseConfig = {
 
 };
 
-
-// تهيئة Firebase
 const app = initializeApp(firebaseConfig);
 
-// تصدير خدمات المصادقة وقاعدة البيانات
-export const auth = getAuth(app);
+// تهيئة قاعدة البيانات Firestore وتصديرها
 export const db = getFirestore(app);
+
+// تهيئة نظام المصادقة Auth وتصديره
+export const auth = getAuth(app);
+
 export default app;

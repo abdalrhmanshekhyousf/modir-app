@@ -1,323 +1,391 @@
+// src/components/POS.jsx
 import React, { useState } from 'react';
-import {
-  Search, ShoppingBag, Plus, Minus, Trash2, Printer, Send,
-  PackageX
+import { createTransaction, addDebt } from '../services/dbServie';
+import { toast } from 'react-hot-toast';
+import { 
+  ShoppingCart, 
+  Plus, 
+  Minus, 
+  CheckCircle, 
+  Trash2, 
+  Search, 
+  User, 
+  Phone, 
+  Printer, 
+  Send, 
+  X, 
+  CreditCard,
+  Image as ImageIcon
 } from 'lucide-react';
-import { addInvoiceToDB, updateProductInDB } from '../services/firestoreService';
 
-export default function POS({
-  products = [],
-  invoices = [],
-  exchangeRate = 15000,
-  currency = 'USD'
-}) {
+export default function POS({ products = [], userId, darkMode, usdRate, onRefresh }) {
   const [cart, setCart] = useState([]);
+  const [loading, setLoading] = useState(false);
+  
+  // حالات البحث
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('الكل');
+  
+  // حالات بيانات الزبون والفاتورة
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [discountUSD, setDiscountUSD] = useState(0);
+  const [paymentType, setPaymentType] = useState('cash'); // 'cash' or 'debt'
 
-  const categories = ['الكل', 'وجبات', 'مشروبات', 'حلويات', 'ساندويش', 'إضافات'];
+  // حالة مودال الطباعة والمعاينة
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [completedTransaction, setCompletedTransaction] = useState(null);
 
+  // إضافة للمنتجات للسلة
   const addToCart = (product) => {
-    if (product.stock <= 0) return;
-    setCart(prevCart => {
-      const existing = prevCart.find(item => item.id === product.id);
-      if (existing) {
-        if (existing.quantity >= product.stock) {
-          alert('وصلت للحد الأقصى للمخزون المتوفر');
-          return prevCart;
-        }
-        return prevCart.map(item =>
-          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-        );
-      }
-      return [...prevCart, { ...product, quantity: 1 }];
-    });
+    const existing = cart.find(item => item.id === product.id);
+    if (existing) {
+      setCart(cart.map(item => 
+        item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+      ));
+    } else {
+      setCart([...cart, { ...product, quantity: 1 }]);
+    }
   };
 
   const updateQuantity = (id, delta) => {
-    setCart(prevCart => {
-      return prevCart.map(item => {
-        if (item.id === id) {
-          const product = products.find(p => p.id === id);
-          const maxStock = product ? product.stock : 999;
-          const newQty = item.quantity + delta;
-          if (newQty > maxStock) {
-            alert('الكمية المطلوبة تتجاوز المخزون المتوفر');
-            return item;
-          }
-          return newQty > 0 ? { ...item, quantity: newQty } : null;
-        }
-        return item;
-      }).filter(Boolean);
-    });
+    setCart(cart.map(item => {
+      if (item.id === id) {
+        const newQty = item.quantity + delta;
+        return newQty > 0 ? { ...item, quantity: newQty } : item;
+      }
+      return item;
+    }));
   };
 
   const removeFromCart = (id) => {
-    setCart(prevCart => prevCart.filter(item => item.id !== id));
+    setCart(cart.filter(item => item.id !== id));
   };
 
-  const subtotalUSD = cart.reduce((sum, item) => sum + ((item.priceUSD || item.price || 0) * item.quantity), 0);
-  const totalUSD = Math.max(0, subtotalUSD - parseFloat(discountUSD || 0));
-  const totalSYP = totalUSD * exchangeRate;
+  const totalUSD = cart.reduce((sum, item) => sum + (item.sellingPrice * item.quantity), 0);
+  const totalSYP = totalUSD * usdRate;
 
-  const handleCheckout = async (shouldSendWhatsApp = false) => {
-    if (cart.length === 0) {
-      alert('السلة فارغة');
+  // فلترة المنتجات بالاسم أو الباركود أو القسم
+  const filteredProducts = products.filter(p => {
+    const term = searchTerm.toLowerCase();
+    return (
+      p.name?.toLowerCase().includes(term) ||
+      p.barcode?.toLowerCase().includes(term) ||
+      p.category?.toLowerCase().includes(term)
+    );
+  });
+
+  // إتمام العملية وحفظ الفاتورة / الدين
+  const handleCheckout = async () => {
+    if (cart.length === 0) return;
+
+    if (paymentType === 'debt' && !customerName.trim()) {
+      toast.error('يرجى إدخال اسم الزبون عند اختيار البيع بالدين');
       return;
     }
 
+    setLoading(true);
     try {
-      // 1. تحديث المخزون في Firebase لكل منتج في السلة
-      for (const cartItem of cart) {
-        const prod = products.find(p => p.id === cartItem.id);
-        if (prod) {
-          const newStock = Math.max(0, prod.stock - cartItem.quantity);
-          await updateProductInDB(cartItem.id, { stock: newStock });
-        }
-      }
-
-      // 2. إنشاء الفاتورة الجديدة
-      const newInvoice = {
-        invoiceNumber: Math.floor(100000 + Math.random() * 900000).toString(),
-        date: new Date().toLocaleString('ar-SY'),
-        customerName: customerName.trim() || 'زبون عام',
-        customerPhone: customerPhone.trim(),
+      const transactionData = {
         items: cart,
-        subtotalUSD,
-        discountUSD: parseFloat(discountUSD || 0),
-        totalUSD,
-        exchangeRate,
-        status: 'paid',
-        createdAt: new Date()
+        totalAmountUSD: totalUSD,
+        totalAmountSYP: totalSYP,
+        usdRate: usdRate,
+        customerName: customerName || 'زبون عام',
+        customerPhone: customerPhone || '—',
+        paymentType: paymentType, // cash أو debt
+        createdAt: new Date().toISOString()
       };
 
-      // 3. حفظ الفاتورة في Firestore
-      await addInvoiceToDB(newInvoice);
+      // 1. حفظ الفاتورة بالمعاملات العامة
+      await createTransaction(transactionData, userId);
 
-      // 4. إرسال الواتساب إن طلب
-      if (shouldSendWhatsApp && customerPhone.trim()) {
-        let itemsText = cart.map(item => `${item.name} x ${item.quantity} = $${((item.priceUSD || item.price) * item.quantity).toFixed(2)}`).join('\n');
-        const message = `فاتورة مبيعات\nرقم الفاتورة: #${newInvoice.invoiceNumber}\nالزبون: ${newInvoice.customerName}\n\n${itemsText}\n\nالإجمالي: $${totalUSD.toFixed(2)} (${totalSYP.toLocaleString()} ل.س)\nشكراً لتسوقكم معنا!`;
-        window.open(`https://wa.me/${customerPhone.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`, '_blank');
+      // 2. إذا كانت العملية "دين"، نقوم بإضافتها لسجل الديون
+      if (paymentType === 'debt') {
+        await addDebt({
+          customerName,
+          customerPhone,
+          amountUSD: totalUSD,
+          amountSYP: totalSYP,
+          details: cart.map(i => `${i.name} (${i.quantity})`).join(', '),
+          date: new Date().toISOString()
+        }, userId);
+        toast.success('تم تسجبل الفاتورة في قائمة الديون');
+      } else {
+        toast.success('تمت عملية البيع بنجاح');
       }
 
-      // 5. إعادة ضبط السلة والحقول
+      setCompletedTransaction(transactionData);
+      setShowReceipt(true); // فتح نافذة الفاتورة والطباعة
+
+      // تفريغ البيانات
       setCart([]);
       setCustomerName('');
       setCustomerPhone('');
-      setDiscountUSD(0);
-      alert('أتمت عملية البيع وتحديث المخزون بنجاح');
+      setPaymentType('cash');
+
+      if (onRefresh) onRefresh();
     } catch (error) {
       console.error(error);
-      alert('حدث خطأ أثناء حفظ الفاتورة في قاعدة البيانات.');
+      toast.error('حدث خطأ أثناء إجراء العملية');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const filteredProducts = products.filter(product => {
-    const matchesSearch = product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          product.barcode?.includes(searchTerm);
-    const matchesCategory = selectedCategory === 'الكل' || product.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  // إرسال الفاتورة عبر واتساب
+  const sendWhatsAppReceipt = () => {
+    if (!completedTransaction) return;
+
+    let phone = completedTransaction.customerPhone.replace(/[^0-9]/g, '');
+    if (!phone) {
+      toast.error('يرجى إدخال رقم هاتف صحيح لإرسال الفاتورة');
+      return;
+    }
+
+    let itemsText = completedTransaction.items.map(i => `• ${i.name} x${i.quantity} = $${i.sellingPrice * i.quantity}`).join('\n');
+    let message = `مرحباً ${completedTransaction.customerName} 👋\n\nإليك تفاصيل فاتورتك:\n${itemsText}\n\nالإجمالي: $${completedTransaction.totalAmountUSD} (${completedTransaction.totalAmountSYP.toLocaleString()} ل.س)\nنوع الدفع: ${completedTransaction.paymentType === 'debt' ? 'دين' : 'نقدي'}\n\nشكراً لتعاملكم معنا!`;
+
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank');
+  };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" dir="rtl">
-      <div className="lg:col-span-2 space-y-5">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="w-5 h-5 absolute right-4 top-1/2 -translate-y-1/2 text-stone-400 dark:text-zinc-500" />
-            <input
-              type="text"
-              placeholder="البحث برقم الباركود أو اسم المنتج..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-4 pr-12 py-3 rounded-2xl bg-stone-100/80 dark:bg-zinc-900/80 border border-stone-200 dark:border-zinc-800 text-stone-900 dark:text-zinc-100 font-bold focus:outline-none focus:border-amber-500 transition shadow-inner text-sm"
-            />
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-            {categories.map((cat, idx) => (
-              <button
-                key={idx}
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-4 py-2.5 rounded-2xl font-black text-xs whitespace-nowrap transition cursor-pointer ${
-                  selectedCategory === cat
-                    ? 'bg-amber-500 text-zinc-950 shadow-md shadow-amber-500/20'
-                    : 'bg-stone-100/80 dark:bg-zinc-900/80 border border-stone-200 dark:border-zinc-800 text-stone-600 dark:text-zinc-400 hover:text-stone-900 dark:hover:text-zinc-100'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 dir-rtl" dir="rtl">
+      
+      {/* 1. قسم شاشة المنتجات والبحث (يظهر أولاً على الموبايل أو يمكن عكس الترتيب حسب الرغبة) */}
+      <div className="lg:col-span-2 space-y-4 order-2 lg:order-1">
+        
+        {/* شريط البحث المتقدم */}
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="ابحث باسم المنتج، الباركود، أو القسم..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className={`w-full p-3.5 pl-11 rounded-2xl border text-sm font-medium focus:outline-none focus:border-emerald-500 transition-all ${
+              darkMode ? 'bg-zinc-900 border-zinc-800 text-white' : 'bg-white border-stone-200 text-stone-900'
+            }`}
+          />
+          <Search className="w-5 h-5 absolute left-3.5 top-3.5 text-stone-400" />
         </div>
 
-        {filteredProducts.length === 0 ? (
-          <div className="text-center py-16 bg-stone-100/40 dark:bg-zinc-900/40 rounded-3xl border border-dashed border-stone-300 dark:border-zinc-800">
-            <PackageX className="w-12 h-12 mx-auto text-stone-400 dark:text-zinc-600 mb-2 opacity-60" />
-            <p className="text-stone-600 dark:text-zinc-400 font-bold text-sm">لا يوجد منتجات لعرضها</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {filteredProducts.map((product) => {
-              const priceUSD = product.priceUSD || product.price || 0;
-              const priceSYP = priceUSD * exchangeRate;
-              const isOutOfStock = product.stock <= 0;
+        {/* شبكة المنتجات */}
+        <div className="max-h-[450px] sm:max-h-[560px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+            {filteredProducts.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => addToCart(p)}
+                className={`p-3 sm:p-3.5 rounded-2xl border text-right transition-all flex flex-col justify-between group hover:border-emerald-500 ${
+                  darkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-stone-200'
+                }`}
+              >
+                {/* صورة المنتج إن وجدت */}
+                <div className="w-full h-20 sm:h-24 rounded-xl mb-3 overflow-hidden bg-zinc-800/50 flex items-center justify-center">
+                  {p.imageUrl ? (
+                    <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                  ) : (
+                    <ImageIcon className="w-8 h-8 text-stone-600" />
+                  )}
+                </div>
 
-              return (
-                <button
-                  key={product.id}
-                  disabled={isOutOfStock}
-                  onClick={() => addToCart(product)}
-                  className={`group relative p-3 rounded-2xl border text-right transition flex flex-col justify-between cursor-pointer ${
-                    isOutOfStock
-                      ? 'opacity-50 cursor-not-allowed bg-stone-200/50 dark:bg-zinc-900/30 border-stone-300 dark:border-zinc-800'
-                      : 'bg-stone-100/90 dark:bg-zinc-900/90 border-stone-200/80 dark:border-zinc-800/80 hover:border-amber-500/80 hover:shadow-lg active:scale-95'
-                  }`}
-                >
-                  <div className="relative h-28 w-full rounded-xl overflow-hidden mb-2 bg-stone-200 dark:bg-zinc-800">
-                    <img
-                      src={product.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=500&q=80'}
-                      alt={product.name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                    {isOutOfStock ? (
-                      <span className="absolute inset-0 bg-zinc-950/70 text-rose-400 font-black text-xs flex items-center justify-center backdrop-blur-xs">
-                        نفدت الكمية
-                      </span>
-                    ) : (
-                      <span className="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded-md text-[10px] font-black bg-zinc-950/80 text-amber-400 backdrop-blur-md">
-                        {product.stock} المتوفر
-                      </span>
-                    )}
-                  </div>
+                <div>
+                  <span className="font-bold text-xs sm:text-sm block line-clamp-1 mb-1">{p.name}</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-800 text-stone-400 inline-block mb-2">
+                    {p.category || 'عام'}
+                  </span>
                   <div>
-                    <h4 className="font-bold text-xs sm:text-sm text-stone-900 dark:text-zinc-100 line-clamp-1">
-                      {product.name}
-                    </h4>
-                    <div className="mt-1 flex items-baseline justify-between">
-                      <span className="text-amber-600 dark:text-amber-400 font-black text-sm">
-                        ${priceUSD.toFixed(2)}
-                      </span>
-                      <span className="text-[10px] font-bold text-stone-400 dark:text-zinc-500">
-                        {priceSYP.toLocaleString()} ل.س
-                      </span>
-                    </div>
+                    <div className="text-emerald-500 font-black text-sm sm:text-base">${p.sellingPrice}</div>
+                    <div className="text-[10px] sm:text-[11px] text-stone-400">{(p.sellingPrice * usdRate).toLocaleString()} ل.س</div>
                   </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                </div>
+              </button>
+            ))}
 
-      <div className="bg-stone-100/90 dark:bg-zinc-900/90 border border-stone-200/80 dark:border-zinc-800/80 rounded-3xl p-5 flex flex-col justify-between space-y-4 shadow-sm h-fit sticky top-24">
-        <div>
-          <div className="flex items-center justify-between pb-3 border-b border-stone-200 dark:border-zinc-800">
-            <h3 className="font-black text-stone-900 dark:text-zinc-100 text-base flex items-center gap-2">
-              سلة البيع الحالية
-              <ShoppingBag className="w-5 h-5 text-amber-500" />
-            </h3>
-            <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-500 text-xs font-black">
-              {cart.reduce((s, i) => s + i.quantity, 0)} عنصر
-            </span>
-          </div>
-
-          <div className="space-y-3 max-h-64 overflow-y-auto my-3 pr-1 text-xs">
-            {cart.length === 0 ? (
-              <div className="text-center py-10 text-stone-400 dark:text-zinc-500 font-bold">
-                السلة فارغة، انقر على أي منتج لإضافته
+            {filteredProducts.length === 0 && (
+              <div className="col-span-full py-12 text-center text-stone-500 text-sm">
+                لم يتم العثور على أي منتجات مطابقة
               </div>
-            ) : (
-              cart.map(item => {
-                const itemPriceUSD = item.priceUSD || item.price || 0;
-                return (
-                  <div key={item.id} className="flex items-center justify-between p-2.5 rounded-2xl bg-stone-200/50 dark:bg-zinc-950/50 border border-stone-200/50 dark:border-zinc-800/50">
-                    <div className="flex-1 ml-2">
-                      <h5 className="font-bold text-xs text-stone-900 dark:text-zinc-100 line-clamp-1">{item.name}</h5>
-                      <span className="text-[10px] font-bold text-amber-500">${(itemPriceUSD * item.quantity).toFixed(2)}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button onClick={() => updateQuantity(item.id, -1)} className="p-1 rounded-lg bg-stone-300/80 dark:bg-zinc-800 text-stone-800 dark:text-zinc-200 hover:bg-amber-500 hover:text-zinc-950 transition cursor-pointer">
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <span className="text-xs font-black text-stone-900 dark:text-zinc-100 px-1">{item.quantity}</span>
-                      <button onClick={() => updateQuantity(item.id, 1)} className="p-1 rounded-lg bg-stone-300/80 dark:bg-zinc-800 text-stone-800 dark:text-zinc-200 hover:bg-amber-500 hover:text-zinc-950 transition cursor-pointer">
-                        <Plus className="w-3 h-3" />
-                      </button>
-                      <button onClick={() => removeFromCart(item.id)} className="p-1 rounded-lg text-rose-500 hover:bg-rose-500/10 transition cursor-pointer mr-1">
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })
             )}
           </div>
         </div>
+      </div>
 
-        <div className="space-y-2 pt-2 border-t border-stone-200 dark:border-zinc-800">
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="text"
-              placeholder="اسم الزبون (اختياري)"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-stone-200/60 dark:bg-zinc-950 border border-stone-300 dark:border-zinc-800 text-xs font-bold focus:outline-none focus:border-amber-500"
-            />
-            <input
-              type="text"
-              placeholder="رقم الواتساب"
-              value={customerPhone}
-              onChange={(e) => setCustomerPhone(e.target.value)}
-              className="px-3 py-2 rounded-xl bg-stone-200/60 dark:bg-zinc-950 border border-stone-300 dark:border-zinc-800 text-xs font-bold focus:outline-none focus:border-amber-500 dir-ltr text-right"
-            />
+      {/* 2. قسم سلة المبيعات وبيانات الزبون */}
+      <div className={`p-4 sm:p-6 rounded-2xl border flex flex-col justify-between order-1 lg:order-2 ${
+        darkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-stone-200'
+      }`}>
+        <div className="space-y-4">
+          <h2 className="text-lg font-bold flex items-center gap-2">
+            <ShoppingCart className="w-5 h-5 text-emerald-500" />
+            <span>سلة المبيعات</span>
+          </h2>
+
+          {/* قائمة العناصر في السلة */}
+          <div className="space-y-2.5 max-h-[180px] sm:max-h-[220px] overflow-y-auto pr-1">
+            {cart.map((item) => (
+              <div key={item.id} className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-zinc-800/40 border border-zinc-700/40 text-xs">
+                <div>
+                  <div className="font-bold line-clamp-1">{item.name}</div>
+                  <div className="text-emerald-400 font-semibold">${item.sellingPrice * item.quantity}</div>
+                </div>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <button onClick={() => updateQuantity(item.id, -1)} className="p-1 rounded bg-zinc-700 hover:bg-zinc-600"><Minus className="w-3 h-3" /></button>
+                  <span className="font-bold px-1">{item.quantity}</span>
+                  <button onClick={() => updateQuantity(item.id, 1)} className="p-1 rounded bg-zinc-700 hover:bg-zinc-600"><Plus className="w-3 h-3" /></button>
+                  <button onClick={() => removeFromCart(item.id)} className="p-1 text-rose-400 hover:text-rose-300 mr-1"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              </div>
+            ))}
+            {cart.length === 0 && <p className="text-center text-stone-500 text-xs py-6">السلة فارغة</p>}
           </div>
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-bold text-stone-600 dark:text-zinc-400">الخصم ($):</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={discountUSD}
-              onChange={(e) => setDiscountUSD(e.target.value)}
-              className="w-20 px-2 py-1 rounded-lg bg-stone-200/60 dark:bg-zinc-950 border border-stone-300 dark:border-zinc-800 font-bold text-center text-xs"
-            />
+
+          {/* بيانات الزبون وحالة البيع */}
+          <div className="pt-3 border-t border-zinc-800 space-y-3">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="اسم الزبون (مطلوب للديون)"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+                className={`w-full p-2.5 pl-9 rounded-xl border text-xs focus:outline-none focus:border-emerald-500 ${
+                  darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-stone-50 border-stone-200'
+                }`}
+              />
+              <User className="w-4 h-4 absolute left-3 top-3 text-stone-400" />
+            </div>
+
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="رقم الهاتف (للواتساب)"
+                value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)}
+                className={`w-full p-2.5 pl-9 rounded-xl border text-xs focus:outline-none focus:border-emerald-500 ${
+                  darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-stone-50 border-stone-200'
+                }`}
+              />
+              <Phone className="w-4 h-4 absolute left-3 top-3 text-stone-400" />
+            </div>
+
+            {/* تحديد نوع الدفع: نقدي أم دين */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setPaymentType('cash')}
+                className={`p-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition-all ${
+                  paymentType === 'cash' 
+                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' 
+                    : darkMode ? 'bg-zinc-800 border-zinc-700 text-stone-400' : 'bg-stone-100 border-stone-200 text-stone-600'
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>نقدي</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPaymentType('debt')}
+                className={`p-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition-all ${
+                  paymentType === 'debt' 
+                    ? 'bg-rose-500/20 border-rose-500 text-rose-400' 
+                    : darkMode ? 'bg-zinc-800 border-zinc-700 text-stone-400' : 'bg-stone-100 border-stone-200 text-stone-600'
+                }`}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                <span>تسجيل كدين</span>
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="pt-3 border-t border-stone-200 dark:border-zinc-800 space-y-3">
-          <div className="flex items-end justify-between">
-            <div>
-              <span className="text-[11px] font-bold text-stone-400 dark:text-zinc-500 block">المبلغ الإجمالي</span>
-              <span className="text-xl font-black text-amber-500">${totalUSD.toFixed(2)}</span>
-            </div>
-            <div className="text-left">
-              <span className="text-xs font-black text-stone-700 dark:text-zinc-300">{totalSYP.toLocaleString()} ل.س</span>
-            </div>
+        {/* المجموع والتأكيد */}
+        <div className="border-t border-zinc-800 pt-4 mt-4 space-y-3">
+          <div className="flex justify-between items-center font-bold">
+            <span>المجموع:</span>
+            <span className="text-emerald-400 text-lg">${totalUSD}</span>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => handleCheckout(true)}
-              disabled={cart.length === 0}
-              className="flex items-center justify-center gap-1.5 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-black text-xs transition cursor-pointer shadow-md"
-            >
-              <Send className="w-4 h-4" />
-              <span>واتساب</span>
-            </button>
-            <button
-              onClick={() => handleCheckout(false)}
-              disabled={cart.length === 0}
-              className="flex items-center justify-center gap-1.5 py-3 rounded-2xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-zinc-950 font-black text-xs transition cursor-pointer shadow-md"
-            >
-              <Printer className="w-4 h-4" />
-              <span>طباعة وتثبيت</span>
-            </button>
+          <div className="flex justify-between items-center text-xs text-stone-400">
+            <span>المعادل بالليرة:</span>
+            <span>{totalSYP.toLocaleString()} ل.س</span>
           </div>
+          
+          <button
+            onClick={handleCheckout}
+            disabled={cart.length === 0 || loading}
+            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+          >
+            <CheckCircle className="w-5 h-5" />
+            <span>{loading ? 'جاري الحفظ...' : 'إتمام الفاتورة'}</span>
+          </button>
         </div>
       </div>
+
+      {/* 3. نافذة طباعة والمعاينة للفاتورة (Receipt Modal) */}
+      {showReceipt && completedTransaction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className={`w-full max-w-md rounded-2xl border p-5 sm:p-6 shadow-2xl relative max-h-[90vh] overflow-y-auto ${
+            darkMode ? 'bg-zinc-900 border-zinc-800 text-white' : 'bg-white border-stone-200 text-stone-900'
+          }`}>
+            <button
+              onClick={() => setShowReceipt(false)}
+              className="absolute top-4 left-4 p-2 text-stone-400 hover:text-white rounded-lg transition-colors print:hidden"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* محتوى الفاتورة المعروض للطباعة */}
+            <div id="receipt-print-area" className="space-y-4 text-center py-2">
+              <h2 className="text-xl font-black">فاتورة مبيعات</h2>
+              <p className="text-xs text-stone-400">{new Date(completedTransaction.createdAt).toLocaleString('ar-EG')}</p>
+
+              <div className="border-y border-dashed border-zinc-700 py-3 text-right text-xs space-y-1">
+                <div><strong>الزبون:</strong> {completedTransaction.customerName}</div>
+                <div><strong>الهاتف:</strong> {completedTransaction.customerPhone}</div>
+                <div><strong>طريقة الدفع:</strong> {completedTransaction.paymentType === 'debt' ? 'دين' : 'نقدي'}</div>
+              </div>
+
+              <div className="divide-y divide-zinc-800 text-xs text-right">
+                {completedTransaction.items.map((item, idx) => (
+                  <div key={idx} className="py-2 flex justify-between items-center">
+                    <span>{item.name} x{item.quantity}</span>
+                    <span className="font-bold">${item.sellingPrice * item.quantity}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t border-dashed border-zinc-700 pt-3 text-right font-bold text-sm space-y-1">
+                <div className="flex justify-between">
+                  <span>المجموع بالعملة:</span>
+                  <span className="text-emerald-400">${completedTransaction.totalAmountUSD}</span>
+                </div>
+                <div className="flex justify-between text-xs text-stone-400">
+                  <span>المعادل بالليرة:</span>
+                  <span>{completedTransaction.totalAmountSYP.toLocaleString()} ل.س</span>
+                </div>
+              </div>
+            </div>
+
+            {/* أزرار الإجراءات السريعة (طباعة وواتساب) */}
+            <div className="pt-4 flex gap-3 print:hidden">
+              <button
+                onClick={() => window.print()}
+                className="flex-1 bg-sky-600 hover:bg-sky-500 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 transition-all"
+              >
+                <Printer className="w-4 h-4" />
+                <span>طباعة الفاتورة</span>
+              </button>
+
+              <button
+                onClick={sendWhatsAppReceipt}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 transition-all"
+              >
+                <Send className="w-4 h-4" />
+                <span>إرسال واتساب</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
