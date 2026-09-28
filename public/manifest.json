@@ -1,0 +1,15 @@
+{
+  "name": "Modir - نظام المبيعات",
+  "short_name": "Modir",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/modir.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
