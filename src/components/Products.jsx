@@ -1,593 +1,538 @@
 // src/components/Products.jsx
-import React, { useState } from 'react';
-import { addProduct, deleteProduct } from '../services/dbServie'; 
+import { useMemo, useState } from 'react';
+import { addProduct, updateProduct, deleteProduct } from '../services/dbServie';
 import { toast } from 'react-hot-toast';
-import { 
-  Plus, 
-  Trash2, 
-  Package, 
-  Layers, 
-  Barcode, 
-  X, 
-  FolderPlus, 
+import {
+  Plus,
+  Minus,
+  Trash2,
+  Package,
+  Layers,
+  Barcode,
+  X,
   Sparkles,
   Image as ImageIcon,
   Upload,
   AlertTriangle,
-  Boxes
+  Boxes,
+  Search,
+  Pencil,
+  PackagePlus,
 } from 'lucide-react';
 
-export default function Products({ products = [], categories = [], userId, darkMode, usdRate, onRefresh }) {
+const fmt = (n) => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
+const newBarcode = () => Math.floor(100000000000 + Math.random() * 900000000000).toString();
+
+const emptyForm = {
+  name: '',
+  sellingPrice: '',
+  costPrice: '',
+  barcode: '',
+  category: '',
+  imageUrl: '',
+  quantity: '',
+  minQuantity: '5',
+};
+
+function StockBadge({ qty, min }) {
+  if (qty <= 0) return <span className="badge badge-danger"><AlertTriangle className="w-3 h-3" />نفد</span>;
+  if (qty <= min) return <span className="badge badge-warn"><AlertTriangle className="w-3 h-3" />منخفض</span>;
+  return <span className="badge badge-brand">متوفر</span>;
+}
+
+function Thumb({ p, size = 'w-11 h-11' }) {
+  return (
+    <div className={`thumb ${size} rounded-xl`}>
+      {p.imageUrl ? <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" /> : <ImageIcon className="w-5 h-5 opacity-50" />}
+    </div>
+  );
+}
+
+export default function Products({ products = [], userId, usdRate, onRefresh }) {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [sellingPrice, setSellingPrice] = useState('');
-  const [costPrice, setCostPrice] = useState('');
-  const [barcode, setBarcode] = useState('');
-  const [category, setCategory] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
-  
-  const [quantity, setQuantity] = useState('');
-  const [lowStockThreshold, setLowStockThreshold] = useState('5');
-  
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(false);
 
-  const [newCategoryName, setNewCategoryName] = useState('');
-  const [showCategoryInput, setShowCategoryInput] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filter, setFilter] = useState('all'); // all | low | out | <category>
+
+  // مودال تعديل المخزون السريع
+  const [stockTarget, setStockTarget] = useState(null);
+  const [stockDelta, setStockDelta] = useState('');
+
+  const categories = useMemo(() => [...new Set(products.map((p) => p.category || 'عام'))], [products]);
+
+  const setField = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const stats = useMemo(() => {
+    let low = 0;
+    let out = 0;
+    let value = 0;
+    products.forEach((p) => {
+      const q = Number(p.quantity ?? 0);
+      if (q <= 0) out += 1;
+      else if (q <= (p.minQuantity ?? 5)) low += 1;
+      value += Math.max(q, 0) * (Number(p.costPrice) || Number(p.sellingPrice) || 0);
+    });
+    return { low, out, value };
+  }, [products]);
+
+  const filtered = products.filter((p) => {
+    const q = Number(p.quantity ?? 0);
+    const term = searchTerm.trim().toLowerCase();
+    const matchesTerm = !term || p.name?.toLowerCase().includes(term) || p.barcode?.toLowerCase().includes(term);
+    let matchesFilter = true;
+    if (filter === 'low') matchesFilter = q > 0 && q <= (p.minQuantity ?? 5);
+    else if (filter === 'out') matchesFilter = q <= 0;
+    else if (filter !== 'all') matchesFilter = (p.category || 'عام') === filter;
+    return matchesTerm && matchesFilter;
+  });
+
+  // ===== فتح المودال =====
+  const openAdd = () => {
+    setEditingId(null);
+    setForm(emptyForm);
+    setIsModalOpen(true);
+  };
+
+  const openEdit = (p) => {
+    setEditingId(p.id);
+    setForm({
+      name: p.name || '',
+      sellingPrice: String(p.sellingPrice ?? ''),
+      costPrice: String(p.costPrice ?? ''),
+      barcode: p.barcode || '',
+      category: p.category || '',
+      imageUrl: p.imageUrl || '',
+      quantity: String(p.quantity ?? 0),
+      minQuantity: String(p.minQuantity ?? 5),
+    });
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingId(null);
+  };
 
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        toast.error('حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 2 ميجابايت');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImageUrl(reader.result);
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+    if (file.size > 700 * 1024) {
+      toast.error('حجم الصورة كبير، اختر صورة أقل من 700 كيلوبايت');
+      return;
     }
+    const reader = new FileReader();
+    reader.onloadend = () => setForm((f) => ({ ...f, imageUrl: reader.result }));
+    reader.readAsDataURL(file);
   };
 
-  const generateBarcode = () => {
-    const randomBarcode = Math.floor(100000000000 + Math.random() * 900000000000).toString();
-    setBarcode(randomBarcode);
-    toast.success('تم توليد الباركود بنجاح');
-  };
-
-  const handleAddProduct = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name || !sellingPrice) {
+    if (!form.name.trim() || !form.sellingPrice) {
       toast.error('يرجى ملء الاسم وسعر البيع على الأقل');
       return;
     }
 
+    const payload = {
+      name: form.name.trim(),
+      sellingPrice: Number(form.sellingPrice),
+      costPrice: Number(form.costPrice) || 0,
+      barcode: form.barcode.trim() || newBarcode(),
+      category: form.category.trim() || 'عام',
+      imageUrl: form.imageUrl || '',
+      quantity: Math.max(0, Math.floor(Number(form.quantity) || 0)),
+      minQuantity: Math.max(0, Math.floor(Number(form.minQuantity) || 5)),
+    };
+
     setLoading(true);
-    const qtyNumber = Number(quantity) || 0;
-    const thresholdNumber = Number(lowStockThreshold) || 5;
-
     try {
-      await addProduct(
-        {
-          name,
-          sellingPrice: Number(sellingPrice),
-          costPrice: Number(costPrice) || 0,
-          barcode: barcode || Math.floor(100000000000 + Math.random() * 900000000000).toString(),
-          category: category || 'عام',
-          imageUrl: imageUrl || '',
-          quantity: qtyNumber,
-          minQuantity: thresholdNumber
-        },
-        userId
-      );
-
-      toast.success('تمت إضافة المنتج بنجاح');
-      
-      setName('');
-      setSellingPrice('');
-      setCostPrice('');
-      setBarcode('');
-      setCategory('');
-      setImageUrl('');
-      setQuantity('');
-      setLowStockThreshold('5');
-      setIsModalOpen(false);
-
+      if (editingId) {
+        await updateProduct(editingId, payload);
+        toast.success('تم تحديث المنتج');
+      } else {
+        await addProduct(payload, userId);
+        toast.success('تمت إضافة المنتج');
+      }
+      closeModal();
       if (onRefresh) onRefresh();
     } catch (error) {
       console.error(error);
-      toast.error('حدث خطأ أثناء إضافة المنتج');
+      toast.error('حدث خطأ أثناء الحفظ');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDelete = async (productId) => {
-    if (window.confirm('هل أنت متأكد من حذف هذا المنتج؟')) {
-      try {
-        await deleteProduct(productId);
-        toast.success('تم حذف المنتج بنجاح');
-        if (onRefresh) onRefresh();
-      } catch (error) {
-        toast.error('حدث خطأ أثناء الحذف');
-      }
-    }
-  };
-
-  const handleAddCategory = () => {
-    if (!newCategoryName.trim()) return;
-    toast.success(`تم إضافة القسم: ${newCategoryName}`);
-    setNewCategoryName('');
-    setShowCategoryInput(false);
-    if (onRefresh) onRefresh();
-  };
-
-  const handleDeleteCategory = (catName) => {
-    if (window.confirm(`هل أنت متأكد من حذف القسم "${catName}"؟`)) {
-      toast.success(`تم حذف القسم ${catName}`);
+  const handleDelete = async (product) => {
+    if (!window.confirm(`هل أنت متأكد من حذف "${product.name}"؟`)) return;
+    try {
+      await deleteProduct(product.id);
+      toast.success('تم حذف المنتج');
       if (onRefresh) onRefresh();
+    } catch {
+      toast.error('حدث خطأ أثناء الحذف');
     }
   };
 
-  const lowStockCount = products.filter(p => (p.quantity ?? 0) <= (p.minQuantity ?? 5)).length;
+  // ===== تعديل المخزون السريع =====
+  const applyStock = async (sign) => {
+    const delta = Math.floor(Number(stockDelta) || 0);
+    if (!stockTarget || delta <= 0) {
+      toast.error('أدخل كمية صحيحة');
+      return;
+    }
+    const current = Number(stockTarget.quantity ?? 0);
+    const next = current + sign * delta;
+    if (next < 0) {
+      toast.error(`لا يمكن الإنقاص أكثر من الكمية الحالية (${current})`);
+      return;
+    }
+    setLoading(true);
+    try {
+      await updateProduct(stockTarget.id, { quantity: next });
+      toast.success(`المخزون الآن: ${next}`);
+      setStockTarget(null);
+      setStockDelta('');
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      console.error(error);
+      toast.error('تعذر تحديث المخزون');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="space-y-6 dir-rtl text-right" dir="rtl">
-      
-      {/* 1. كروت الإحصائيات والأزرار السريعة */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className={`p-4 sm:p-5 rounded-2xl border flex items-center justify-between shadow-sm ${
-          darkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-stone-200'
-        }`}>
-          <div>
-            <p className="text-xs font-medium text-stone-400">إجمالي المنتجات</p>
-            <h3 className="text-xl sm:text-2xl font-black mt-1 text-emerald-500">{products.length}</h3>
-          </div>
-          <div className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl">
-            <Package className="w-6 h-6" />
-          </div>
+    <div className="space-y-5 sm:space-y-6" dir="rtl">
+      {/* ===== الترويسة ===== */}
+      <div className="page-head">
+        <div>
+          <h2 className="page-title">المنتجات والمخزون</h2>
+          <p className="page-sub">الكميات تنقص تلقائياً مع كل عملية بيع</p>
         </div>
+        <button onClick={openAdd} className="btn btn-primary w-full sm:w-auto">
+          <Plus className="w-[18px] h-[18px]" />
+          إضافة منتج
+        </button>
+      </div>
 
-        <div className={`p-4 sm:p-5 rounded-2xl border flex items-center justify-between shadow-sm ${
-          darkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-stone-200'
-        }`}>
+      {/* ===== الإحصائيات ===== */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="card stat">
           <div>
-            <p className="text-xs font-medium text-stone-400">منتجات منخفضة/منتهية</p>
-            <h3 className="text-xl sm:text-2xl font-black mt-1 text-amber-500">{lowStockCount}</h3>
+            <p className="stat-label">إجمالي المنتجات</p>
+            <p className="stat-value">{products.length}</p>
           </div>
-          <div className="p-3 bg-amber-500/10 text-amber-500 rounded-xl">
-            <AlertTriangle className="w-6 h-6" />
-          </div>
+          <div className="icon-tile tone-brand hidden sm:inline-flex"><Package className="w-5 h-5" /></div>
         </div>
-
-        <div className={`p-4 sm:p-5 rounded-2xl border flex items-center justify-between shadow-sm ${
-          darkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-stone-200'
-        }`}>
+        <button className="card stat text-right hover:border-line-strong transition" onClick={() => setFilter(filter === 'low' ? 'all' : 'low')}>
           <div>
-            <p className="text-xs font-medium text-stone-400">الأقسام المتاحة</p>
-            <h3 className="text-xl sm:text-2xl font-black mt-1 text-sky-500">{categories.length || 1}</h3>
+            <p className="stat-label">مخزون منخفض</p>
+            <p className="stat-value !text-warn">{stats.low}</p>
           </div>
-          <div className="p-3 bg-sky-500/10 text-sky-500 rounded-xl">
-            <Layers className="w-6 h-6" />
+          <div className="icon-tile tone-warn hidden sm:inline-flex"><AlertTriangle className="w-5 h-5" /></div>
+        </button>
+        <button className="card stat text-right hover:border-line-strong transition" onClick={() => setFilter(filter === 'out' ? 'all' : 'out')}>
+          <div>
+            <p className="stat-label">نفد من المخزون</p>
+            <p className="stat-value !text-danger">{stats.out}</p>
           </div>
-        </div>
-
-        <div className="flex gap-2">
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-2xl p-4 flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-600/20"
-          >
-            <Plus className="w-5 h-5" />
-            <span className="text-sm">إضافة منتج</span>
-          </button>
-
-          <button
-            onClick={() => setShowCategoryInput(!showCategoryInput)}
-            className={`p-4 rounded-2xl border font-bold transition-all flex items-center justify-center gap-2 ${
-              darkMode ? 'bg-zinc-800 border-zinc-700 text-white hover:bg-zinc-700' : 'bg-stone-100 border-stone-200 hover:bg-stone-200'
-            }`}
-            title="إدارة الأقسام"
-          >
-            <FolderPlus className="w-5 h-5 text-sky-400" />
-          </button>
+          <div className="icon-tile tone-danger hidden sm:inline-flex"><Boxes className="w-5 h-5" /></div>
+        </button>
+        <div className="card stat">
+          <div className="min-w-0">
+            <p className="stat-label">قيمة المخزون</p>
+            <p className="stat-value truncate">${fmt(stats.value)}</p>
+          </div>
+          <div className="icon-tile tone-info hidden sm:inline-flex"><Layers className="w-5 h-5" /></div>
         </div>
       </div>
 
-      {/* 2. شريط إدارة الأقسام */}
-      {showCategoryInput && (
-        <div className={`p-4 sm:p-5 rounded-2xl border shadow-sm ${
-          darkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-stone-200'
-        }`}>
-          <h3 className="text-sm font-bold mb-3 flex items-center gap-2">
-            <Layers className="w-4 h-4 text-sky-400" />
-            <span>إدارة الأقسام</span>
-          </h3>
-
-          <div className="flex flex-col sm:flex-row gap-3 mb-4">
-            <input
-              type="text"
-              placeholder="اسم القسم الجديد"
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              className={`flex-1 p-2.5 rounded-xl border text-sm focus:outline-none focus:border-sky-500 ${
-                darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-stone-50 border-stone-200'
-              }`}
-            />
-            <button
-              onClick={handleAddCategory}
-              className="bg-sky-600 hover:bg-sky-500 text-white px-5 py-2.5 rounded-xl font-bold text-sm transition-all"
-            >
-              حفظ القسم
-            </button>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            {(categories.length > 0 ? categories : ['عام']).map((cat, idx) => (
-              <span
-                key={idx}
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border ${
-                  darkMode ? 'bg-zinc-800 border-zinc-700 text-stone-300' : 'bg-stone-100 border-stone-200 text-stone-700'
-                }`}
-              >
-                {cat}
-                <button
-                  onClick={() => handleDeleteCategory(cat)}
-                  className="text-rose-400 hover:text-rose-600 transition-colors"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </span>
-            ))}
-          </div>
+      {/* ===== البحث والفلاتر ===== */}
+      <div className="flex flex-col md:flex-row gap-3 md:items-center">
+        <div className="relative md:w-80 shrink-0">
+          <Search className="field-icon right-3.5" />
+          <input
+            type="text"
+            placeholder="ابحث بالاسم أو الباركود..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="field !pr-10 !bg-surface"
+          />
         </div>
-      )}
+        <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-4 px-4 md:mx-0 md:px-0">
+          <button className="chip" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>الكل</button>
+          <button className="chip" aria-pressed={filter === 'low'} onClick={() => setFilter('low')}>منخفض</button>
+          <button className="chip" aria-pressed={filter === 'out'} onClick={() => setFilter('out')}>نفد</button>
+          {categories.length > 1 && <span className="w-px bg-line my-1 shrink-0" />}
+          {categories.length > 1 &&
+            categories.map((cat) => (
+              <button key={cat} className="chip" aria-pressed={filter === cat} onClick={() => setFilter(cat)}>{cat}</button>
+            ))}
+        </div>
+      </div>
 
-      {/* 3. عرض المنتجات: جدول للشاشات الكبيرة + بطاقات للشاشات الصغيرة والمتوسطة */}
-      <div className={`rounded-2xl border overflow-hidden shadow-sm ${
-        darkMode ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-stone-200'
-      }`}>
-        
-        {/* العرض للشاشات الكبيرة (Desktop Table) */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-right text-sm whitespace-nowrap">
-            <thead className={darkMode ? 'bg-zinc-800/50 text-stone-300' : 'bg-stone-100 text-stone-600'}>
+      {/* ===== جدول (شاشات كبيرة) ===== */}
+      <div className="card overflow-hidden hidden md:block">
+        <div className="overflow-x-auto">
+          <table className="data-table">
+            <thead>
               <tr>
-                <th className="p-4">الصورة</th>
-                <th className="p-4">المنتج</th>
-                <th className="p-4">القسم</th>
-                <th className="p-4">الكمية</th>
-                <th className="p-4">سعر البيع ($)</th>
-                <th className="p-4">السعر بالليرة</th>
-                <th className="p-4">التكلفة ($)</th>
-                <th className="p-4">الباركود</th>
-                <th className="p-4 text-center">إجراءات</th>
+                <th>المنتج</th>
+                <th>القسم</th>
+                <th>المخزون</th>
+                <th>سعر البيع</th>
+                <th>التكلفة</th>
+                <th>الباركود</th>
+                <th className="!text-center">إجراءات</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-800/40">
-              {products.map((p) => {
-                const qty = p.quantity ?? 0;
-                const minQty = p.minQuantity ?? 5;
-                const isLowStock = qty <= minQty;
-
+            <tbody>
+              {filtered.map((p) => {
+                const qty = Number(p.quantity ?? 0);
+                const min = p.minQuantity ?? 5;
                 return (
-                  <tr key={p.id} className={darkMode ? 'hover:bg-zinc-800/30' : 'hover:bg-stone-50'}>
-                    <td className="p-4">
-                      {p.imageUrl ? (
-                        <img src={p.imageUrl} alt={p.name} className="w-12 h-12 object-cover rounded-xl border border-zinc-700/50" />
-                      ) : (
-                        <div className="w-12 h-12 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-stone-500">
-                          <ImageIcon className="w-5 h-5" />
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-4 font-bold">{p.name}</td>
-                    <td className="p-4 text-xs font-medium text-stone-400">
-                      <span className="px-2.5 py-1 bg-zinc-800 rounded-lg border border-zinc-700">
-                        {p.category || 'عام'}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center gap-2">
-                        <span className={`font-bold ${qty === 0 ? 'text-rose-500' : isLowStock ? 'text-amber-500' : darkMode ? 'text-white' : 'text-stone-800'}`}>
-                          {qty}
-                        </span>
-                        {isLowStock && (
-                          <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md font-bold ${
-                            qty === 0 ? 'bg-rose-500/10 text-rose-500 border border-rose-500/20' : 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
-                          }`}>
-                            <AlertTriangle className="w-3 h-3" />
-                            {qty === 0 ? 'منتهي' : 'منخفض'}
-                          </span>
-                        )}
+                  <tr key={p.id}>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <Thumb p={p} />
+                        <span className="font-semibold">{p.name}</span>
                       </div>
                     </td>
-                    <td className="p-4 text-emerald-400 font-bold">${p.sellingPrice}</td>
-                    <td className="p-4 font-medium">{(p.sellingPrice * usdRate).toLocaleString()} ل.س</td>
-                    <td className="p-4 text-stone-400">${p.costPrice || 0}</td>
-                    <td className="p-4 font-mono text-xs text-stone-400">{p.barcode || '—'}</td>
-                    <td className="p-4 text-center">
-                      <button
-                        onClick={() => handleDelete(p.id)}
-                        className="p-2 bg-rose-500/10 text-rose-500 rounded-lg hover:bg-rose-500 hover:text-white transition-all"
-                        title="حذف المنتج"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                    <td><span className="badge">{p.category || 'عام'}</span></td>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <span className={`font-bold num text-base ${qty <= 0 ? 'text-danger' : qty <= min ? 'text-warn' : ''}`}>{qty}</span>
+                        <StockBadge qty={qty} min={min} />
+                      </div>
+                    </td>
+                    <td>
+                      <div className="font-semibold num">${fmt(p.sellingPrice)}</div>
+                      <div className="text-[11px] text-muted num">{fmt(p.sellingPrice * usdRate)} ل.س</div>
+                    </td>
+                    <td className="text-muted num">${fmt(p.costPrice)}</td>
+                    <td className="font-mono text-xs text-muted" dir="ltr">{p.barcode || '—'}</td>
+                    <td>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button onClick={() => { setStockTarget(p); setStockDelta(''); }} className="btn btn-secondary btn-sm" title="تعديل المخزون">
+                          <PackagePlus className="w-4 h-4 text-brand" />
+                          مخزون
+                        </button>
+                        <button onClick={() => openEdit(p)} className="btn btn-ghost btn-icon-sm" title="تعديل"><Pencil className="w-4 h-4" /></button>
+                        <button onClick={() => handleDelete(p)} className="btn btn-ghost btn-icon-sm hover:!text-danger" title="حذف"><Trash2 className="w-4 h-4" /></button>
+                      </div>
                     </td>
                   </tr>
                 );
               })}
-              {products.length === 0 && (
-                <tr>
-                  <td colSpan="9" className="p-8 text-center text-stone-500">لا توجد منتجات مضافة بعد</td>
-                </tr>
-              )}
             </tbody>
           </table>
-        </div>
-
-        {/* العرض للشاشات الصغيرة والمتوسطة (Mobile Cards Grid) */}
-        <div className="block md:hidden p-4 space-y-3">
-          {products.map((p) => {
-            const qty = p.quantity ?? 0;
-            const minQty = p.minQuantity ?? 5;
-            const isLowStock = qty <= minQty;
-
-            return (
-              <div key={p.id} className={`p-4 rounded-xl border flex flex-col gap-3 ${
-                darkMode ? 'bg-zinc-800/40 border-zinc-800' : 'bg-stone-50 border-stone-200'
-              }`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {p.imageUrl ? (
-                      <img src={p.imageUrl} alt={p.name} className="w-14 h-14 object-cover rounded-xl border border-zinc-700/50 shrink-0" />
-                    ) : (
-                      <div className="w-14 h-14 rounded-xl bg-zinc-800 border border-zinc-700 flex items-center justify-center text-stone-500 shrink-0">
-                        <ImageIcon className="w-6 h-6" />
-                      </div>
-                    )}
-                    <div>
-                      <h4 className="font-bold text-base">{p.name}</h4>
-                      <span className="inline-block mt-1 px-2.5 py-0.5 bg-zinc-800/80 rounded-md text-[11px] font-medium text-stone-300 border border-zinc-700">
-                        {p.category || 'عام'}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleDelete(p.id)}
-                    className="p-2.5 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition-all shrink-0"
-                    title="حذف المنتج"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-700/30 text-xs">
-                  <div>
-                    <span className="text-stone-400 block mb-0.5">الكمية المتوفرة:</span>
-                    <div className="flex items-center gap-1.5 font-bold">
-                      <span className={qty === 0 ? 'text-rose-500' : isLowStock ? 'text-amber-500' : ''}>{qty}</span>
-                      {isLowStock && (
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${qty === 0 ? 'bg-rose-500/10 text-rose-500' : 'bg-amber-500/10 text-amber-500'}`}>
-                          {qty === 0 ? 'منتهي' : 'منخفض'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-stone-400 block mb-0.5">سعر البيع:</span>
-                    <span className="text-emerald-400 font-bold">${p.sellingPrice} / {(p.sellingPrice * usdRate).toLocaleString()} ل.س</span>
-                  </div>
-                  <div>
-                    <span className="text-stone-400 block mb-0.5">سعر التكلفة:</span>
-                    <span className="font-medium">${p.costPrice || 0}</span>
-                  </div>
-                  <div>
-                    <span className="text-stone-400 block mb-0.5">الباركود:</span>
-                    <span className="font-mono">{p.barcode || '—'}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {products.length === 0 && (
-            <div className="p-8 text-center text-stone-500">لا توجد منتجات مضافة بعد</div>
+          {filtered.length === 0 && (
+            <div className="empty">
+              <Package className="w-8 h-8 opacity-50" />
+              <span>{products.length === 0 ? 'لا توجد منتجات بعد' : 'لا توجد نتائج مطابقة'}</span>
+            </div>
           )}
         </div>
-
       </div>
 
-      {/* 4. مودال إضافة منتج جديد (متجاوب بالكامل) */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
-          <div className={`w-full max-w-lg rounded-2xl border p-4 sm:p-6 shadow-2xl relative my-8 max-h-[90vh] overflow-y-auto ${
-            darkMode ? 'bg-zinc-900 border-zinc-800 text-white' : 'bg-white border-stone-200 text-stone-900'
-          }`}>
-            <button
-              onClick={() => setIsModalOpen(false)}
-              className="absolute top-4 left-4 p-2 text-stone-400 hover:text-white rounded-lg transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <h2 className="text-lg font-bold mb-6 flex items-center gap-2">
-              <Package className="w-5 h-5 text-emerald-500" />
-              <span>إضافة منتج جديد</span>
-            </h2>
-
-            <form onSubmit={handleAddProduct} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium mb-1.5 text-stone-400">صورة المنتج</label>
-                <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
-                  <div className={`w-16 h-16 rounded-xl border flex items-center justify-center overflow-hidden shrink-0 mx-auto sm:mx-0 ${
-                    darkMode ? 'bg-zinc-800 border-zinc-700' : 'bg-stone-100 border-stone-200'
-                  }`}>
-                    {imageUrl ? (
-                      <img src={imageUrl} alt="معاينة" className="w-full h-full object-cover" />
-                    ) : (
-                      <ImageIcon className="w-6 h-6 text-stone-500" />
-                    )}
+      {/* ===== كروت (موبايل وتابلت) ===== */}
+      <div className="md:hidden space-y-3">
+        {filtered.map((p) => {
+          const qty = Number(p.quantity ?? 0);
+          const min = p.minQuantity ?? 5;
+          return (
+            <div key={p.id} className="card p-3.5">
+              <div className="flex items-start gap-3">
+                <Thumb p={p} size="w-16 h-16" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <h4 className="font-semibold leading-snug line-clamp-2">{p.name}</h4>
+                    <StockBadge qty={qty} min={min} />
                   </div>
-
-                  <div className="flex-1 space-y-2">
-                    <label className="cursor-pointer bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all">
-                      <Upload className="w-4 h-4" />
-                      <span>رفع صورة من الجهاز</span>
-                      <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                    </label>
-
-                    <input
-                      type="text"
-                      placeholder="أو ضع رابط صورة مباشر (URL)"
-                      value={imageUrl}
-                      onChange={(e) => setImageUrl(e.target.value)}
-                      className={`w-full p-2.5 rounded-xl border text-xs focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-stone-50 border-stone-200'
-                      }`}
-                    />
+                  <div className="mt-1 flex items-center gap-2 text-xs text-muted">
+                    <span>{p.category || 'عام'}</span>
+                    <span>·</span>
+                    <span className="font-mono" dir="ltr">{p.barcode || '—'}</span>
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="font-bold text-brand num">${fmt(p.sellingPrice)}</span>
+                    <span className="text-[11px] text-muted num">{fmt(p.sellingPrice * usdRate)} ل.س</span>
                   </div>
                 </div>
               </div>
 
+              <div className="mt-3 pt-3 border-t border-line flex items-center justify-between gap-2">
+                <div className="text-xs text-muted">
+                  المخزون:{' '}
+                  <span className={`font-bold text-base num ${qty <= 0 ? 'text-danger' : qty <= min ? 'text-warn' : 'text-ink'}`}>{qty}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => { setStockTarget(p); setStockDelta(''); }} className="btn btn-secondary btn-sm">
+                    <PackagePlus className="w-4 h-4 text-brand" />
+                    مخزون
+                  </button>
+                  <button onClick={() => openEdit(p)} className="btn btn-ghost btn-icon" aria-label="تعديل"><Pencil className="w-4 h-4" /></button>
+                  <button onClick={() => handleDelete(p)} className="btn btn-ghost btn-icon hover:!text-danger" aria-label="حذف"><Trash2 className="w-4 h-4" /></button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {filtered.length === 0 && (
+          <div className="card empty">
+            <Package className="w-8 h-8 opacity-50" />
+            <span>{products.length === 0 ? 'لا توجد منتجات بعد' : 'لا توجد نتائج مطابقة'}</span>
+          </div>
+        )}
+      </div>
+
+      {/* ===== مودال تعديل المخزون ===== */}
+      {stockTarget && (
+        <div className="modal-backdrop" onClick={() => setStockTarget(null)}>
+          <div className="modal max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setStockTarget(null)} className="btn btn-ghost btn-icon absolute top-4 left-4" aria-label="إغلاق"><X className="w-5 h-5" /></button>
+            <h3 className="section-title !text-lg mb-1">
+              <PackagePlus className="w-5 h-5 text-brand" />
+              تعديل المخزون
+            </h3>
+            <p className="text-sm text-muted mb-5">
+              {stockTarget.name} — الكمية الحالية: <span className="font-bold text-ink num">{Number(stockTarget.quantity ?? 0)}</span>
+            </p>
+
+            <label className="label">الكمية</label>
+            <input
+              type="number"
+              min="1"
+              inputMode="numeric"
+              placeholder="مثال: 10"
+              value={stockDelta}
+              onChange={(e) => setStockDelta(e.target.value)}
+              className="field !h-12 !text-lg text-center num"
+              autoFocus
+            />
+
+            <div className="grid grid-cols-2 gap-2 mt-4">
+              <button onClick={() => applyStock(-1)} disabled={loading} className="btn btn-secondary">
+                <Minus className="w-4 h-4 text-danger" />
+                إنقاص
+              </button>
+              <button onClick={() => applyStock(1)} disabled={loading} className="btn btn-primary">
+                <Plus className="w-4 h-4" />
+                إضافة للمخزون
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== مودال إضافة / تعديل منتج ===== */}
+      {isModalOpen && (
+        <div className="modal-backdrop" onClick={closeModal}>
+          <div className="modal max-w-lg" onClick={(e) => e.stopPropagation()}>
+            <button onClick={closeModal} className="btn btn-ghost btn-icon absolute top-4 left-4" aria-label="إغلاق"><X className="w-5 h-5" /></button>
+
+            <h3 className="section-title !text-lg mb-6">
+              <Package className="w-5 h-5 text-brand" />
+              {editingId ? 'تعديل المنتج' : 'إضافة منتج جديد'}
+            </h3>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* الصورة */}
+              <div className="flex items-center gap-3">
+                <div className="thumb w-20 h-20 rounded-2xl">
+                  {form.imageUrl ? <img src={form.imageUrl} alt="معاينة" className="w-full h-full object-cover" /> : <ImageIcon className="w-7 h-7 opacity-50" />}
+                </div>
+                <div className="flex-1 space-y-2 min-w-0">
+                  <label className="btn btn-secondary btn-sm w-full">
+                    <Upload className="w-4 h-4" />
+                    رفع صورة
+                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="أو رابط صورة (URL)"
+                    value={form.imageUrl.startsWith('data:') ? '' : form.imageUrl}
+                    onChange={setField('imageUrl')}
+                    className="field field-sm"
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+
               <div>
-                <label className="block text-xs font-medium mb-1.5 text-stone-400">اسم المنتج *</label>
+                <label className="label">اسم المنتج *</label>
+                <input type="text" placeholder="مثال: وجبة برغر دجاج" value={form.name} onChange={setField('name')} className="field" required />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">سعر التكلفة ($)</label>
+                  <input type="number" step="0.01" min="0" placeholder="0.00" value={form.costPrice} onChange={setField('costPrice')} className="field num" />
+                </div>
+                <div>
+                  <label className="label">سعر البيع ($) *</label>
+                  <input type="number" step="0.01" min="0" placeholder="0.00" value={form.sellingPrice} onChange={setField('sellingPrice')} className="field num" required />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">الكمية المتوفرة</label>
+                  <input type="number" min="0" inputMode="numeric" placeholder="0" value={form.quantity} onChange={setField('quantity')} className="field num" />
+                </div>
+                <div>
+                  <label className="label">تنبيه عند كمية</label>
+                  <input type="number" min="0" inputMode="numeric" placeholder="5" value={form.minQuantity} onChange={setField('minQuantity')} className="field num" />
+                </div>
+              </div>
+
+              <div>
+                <label className="label">القسم</label>
                 <input
                   type="text"
-                  placeholder="مثال: وجبة برغر دجاج"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className={`w-full p-3 rounded-xl border text-sm font-medium focus:outline-none focus:border-emerald-500 ${
-                    darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-stone-50 border-stone-200'
-                  }`}
-                  required
+                  list="category-options"
+                  placeholder="اختر أو اكتب قسماً جديداً"
+                  value={form.category}
+                  onChange={setField('category')}
+                  className="field"
                 />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1.5 text-stone-400 flex items-center gap-1">
-                    <Boxes className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>الكمية المتوفرة</span>
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={quantity}
-                    onChange={(e) => setQuantity(e.target.value)}
-                    className={`w-full p-3 rounded-xl border text-sm font-medium focus:outline-none focus:border-emerald-500 ${
-                      darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-stone-50 border-stone-200'
-                    }`}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1.5 text-stone-400 flex items-center gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                    <span>تنبيه عند كمية (تلقائي 5)</span>
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    placeholder="5"
-                    value={lowStockThreshold}
-                    onChange={(e) => setLowStockThreshold(e.target.value)}
-                    className={`w-full p-3 rounded-xl border text-sm font-medium focus:outline-none focus:border-emerald-500 ${
-                      darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-stone-50 border-stone-200'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1.5 text-stone-400">سعر التكلفة ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={costPrice}
-                    onChange={(e) => setCostPrice(e.target.value)}
-                    className={`w-full p-3 rounded-xl border text-sm font-medium focus:outline-none focus:border-emerald-500 ${
-                      darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-stone-50 border-stone-200'
-                    }`}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1.5 text-stone-400">سعر البيع ($) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={sellingPrice}
-                    onChange={(e) => setSellingPrice(e.target.value)}
-                    className={`w-full p-3 rounded-xl border text-sm font-medium focus:outline-none focus:border-emerald-500 ${
-                      darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-stone-50 border-stone-200'
-                    }`}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium mb-1.5 text-stone-400">القسم</label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className={`w-full p-3 rounded-xl border text-sm font-medium focus:outline-none focus:border-emerald-500 ${
-                    darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-stone-50 border-stone-200'
-                  }`}
-                >
-                  <option value="">اختر القسم (اختياري)</option>
-                  {(categories.length > 0 ? categories : ['عام', 'وجبات', 'مشروبات']).map((cat, idx) => (
-                    <option key={idx} value={cat}>{cat}</option>
+                <datalist id="category-options">
+                  {[...new Set([...categories, 'عام', 'وجبات', 'مشروبات'])].map((cat) => (
+                    <option key={cat} value={cat} />
                   ))}
-                </select>
+                </datalist>
               </div>
 
               <div>
-                <label className="block text-xs font-medium mb-1.5 text-stone-400">الباركود</label>
+                <label className="label">الباركود</label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
+                    <Barcode className="field-icon left-3.5" />
                     <input
                       type="text"
-                      placeholder="أدخل الباركود أو ولّده تلقائياً"
-                      value={barcode}
-                      onChange={(e) => setBarcode(e.target.value)}
-                      className={`w-full p-3 pl-10 rounded-xl border text-sm font-mono focus:outline-none focus:border-emerald-500 ${
-                        darkMode ? 'bg-zinc-800 border-zinc-700 text-white' : 'bg-stone-50 border-stone-200'
-                      }`}
+                      placeholder="امسح أو ولّد تلقائياً"
+                      value={form.barcode}
+                      onChange={setField('barcode')}
+                      className="field font-mono !pl-10"
+                      dir="ltr"
                     />
-                    <Barcode className="w-4 h-4 absolute left-3 top-3.5 text-stone-400" />
                   </div>
-                  <button
-                    type="button"
-                    onClick={generateBarcode}
-                    className="px-3 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border border-emerald-500/30 rounded-xl text-xs font-bold flex items-center gap-1 transition-all"
-                  >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>توليد</span>
+                  <button type="button" onClick={() => setForm((f) => ({ ...f, barcode: newBarcode() }))} className="btn btn-secondary">
+                    <Sparkles className="w-4 h-4 text-brand" />
+                    توليد
                   </button>
                 </div>
               </div>
 
-              <div className="pt-2 flex gap-3">
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
-                >
-                  <Plus className="w-5 h-5" />
-                  <span>{loading ? 'جاري الحفظ...' : 'حفظ المنتج'}</span>
+              <div className="pt-2 flex gap-2">
+                <button type="submit" disabled={loading} className="btn btn-primary flex-1">
+                  {editingId ? <Pencil className="w-4 h-4" /> : <Plus className="w-[18px] h-[18px]" />}
+                  {loading ? 'جاري الحفظ...' : editingId ? 'حفظ التعديلات' : 'حفظ المنتج'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className={`px-5 py-3 rounded-xl font-bold text-sm transition-all ${
-                    darkMode ? 'bg-zinc-800 text-stone-300 hover:bg-zinc-700' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-                  }`}
-                >
-                  إلغاء
-                </button>
+                <button type="button" onClick={closeModal} className="btn btn-secondary">إلغاء</button>
               </div>
             </form>
           </div>
