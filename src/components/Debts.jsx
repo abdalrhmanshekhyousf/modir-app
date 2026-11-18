@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getDebts, addDebt, updateDebt, deleteDebt } from '../services/dbServie';
 import { toast } from 'react-hot-toast';
+import NumInput from './NumInput';
 import {
   Plus,
   Trash2,
@@ -31,20 +32,20 @@ export default function Debts({ userId, usdRate }) {
   const [editAmountUSD, setEditAmountUSD] = useState('');
   const [payAmount, setPayAmount] = useState('');
 
-  const loadDebts = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const data = await getDebts(userId);
-      setDebts((data || []).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
-    } catch (error) {
-      console.error(error);
-      toast.error('حدث خطأ أثناء جلب الديون');
-    }
-  }, [userId]);
+  const loadDebts = useCallback(
+    () =>
+      getDebts(userId)
+        .then((data) => setDebts((data || []).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))))
+        .catch((error) => {
+          console.error(error);
+          toast.error('حدث خطأ أثناء جلب الديون');
+        }),
+    [userId]
+  );
 
   useEffect(() => {
-    loadDebts();
-  }, [loadDebts]);
+    if (userId) loadDebts();
+  }, [userId, loadDebts]);
 
   const handleAddDebt = async (e) => {
     e.preventDefault();
@@ -176,7 +177,7 @@ export default function Debts({ userId, usdRate }) {
           </div>
           <div>
             <label className="label">المبلغ ($) *</label>
-            <input type="number" step="0.01" min="0" placeholder="0.00" value={amountUSD} onChange={(e) => setAmountUSD(e.target.value)} className="field num" required />
+            <NumInput step="0.01" min="0" placeholder="0.00" value={amountUSD} onChange={(e) => setAmountUSD(e.target.value)} className="field num" required />
           </div>
           <button type="submit" disabled={loading} className="btn btn-primary">
             <Plus className="w-[18px] h-[18px]" />
@@ -314,11 +315,11 @@ export default function Debts({ userId, usdRate }) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">الدين الحالي ($)</label>
-                  <input type="number" step="0.01" min="0" value={editAmountUSD} onChange={(e) => setEditAmountUSD(e.target.value)} className="field num" required />
+                  <NumInput step="0.01" min="0" value={editAmountUSD} onChange={(e) => setEditAmountUSD(e.target.value)} className="field num" required />
                 </div>
                 <div>
                   <label className="label">دفعة الآن ($)</label>
-                  <input type="number" step="0.01" min="0" placeholder="0.00" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="field num" autoFocus />
+                  <NumInput step="0.01" min="0" placeholder="0.00" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="field num" autoFocus />
                 </div>
               </div>
 

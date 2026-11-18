@@ -117,6 +117,44 @@ export const checkoutSale = async ({ items, transactionData, debtData }, userId)
   });
 };
 
+/**
+ * إلغاء فاتورة: إرجاع الكميات للمخزون + حذف الفاتورة + حذف الدين المرتبط بها (إن وجد)
+ * كل ذلك في عملية واحدة.
+ */
+export const cancelInvoice = async (invoice, userId) => {
+  if (!userId || !invoice?.id) throw new Error('invalid');
+
+  // الديون المرتبطة بهذه الفاتورة (للفواتير الجديدة فقط التي تحمل invoiceId)
+  const linkedDebts = await getDocs(
+    query(collection(db, 'debts'), where('userId', '==', userId), where('invoiceId', '==', invoice.id))
+  );
+
+  // تجميع الكميات حسب المنتج
+  const qtyById = {};
+  (invoice.items || []).forEach((item) => {
+    if (!item.id) return;
+    qtyById[item.id] = (qtyById[item.id] || 0) + (Number(item.quantity) || 0);
+  });
+  const ids = Object.keys(qtyById);
+  const now = new Date().toISOString();
+
+  return await runTransaction(db, async (tx) => {
+    const refs = ids.map((id) => doc(db, 'products', id));
+    const snaps = await Promise.all(refs.map((ref) => tx.get(ref)));
+
+    snaps.forEach((snap, idx) => {
+      if (!snap.exists()) return; // المنتج محذوف — لا شيء لإرجاعه
+      const current = Number(snap.data().quantity ?? 0);
+      tx.update(refs[idx], { quantity: current + qtyById[ids[idx]], updatedAt: now });
+    });
+
+    tx.delete(doc(db, 'invoices', invoice.id));
+    linkedDebts.docs.forEach((d) => tx.delete(d.ref));
+
+    return { restoredProducts: snaps.filter((s) => s.exists()).length, removedDebts: linkedDebts.size };
+  });
+};
+
 // --- الديون والعملاء (Debts) ---
 export const getDebts = async (userId) => {
   if (!userId) return [];

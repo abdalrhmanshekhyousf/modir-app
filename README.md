@@ -1,16 +1,121 @@
-# React + Vite
+<div dir="rtl">
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+# Modir — نظام المبيعات وإدارة المخزون
 
-Currently, two official plugins are available:
+تطبيق ويب عربي لإدارة المحلات الصغيرة والمطاعم: نقطة بيع، مخزون يتحدث تلقائياً، فواتير، ديون الزبائن، وتقارير يومية وشهرية.
+يعمل على الموبايل والتابلت والكمبيوتر، ويدعم الوضع الداكن والفاتح، والتسعير بالدولار مع المعادل بالليرة السورية.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## المميزات
 
-## React Compiler
+### 🛒 نقطة البيع
+- إضافة المنتجات للسلة بالضغط، أو بالبحث بالاسم/الباركود/القسم.
+- مسح الباركود **بالكاميرا** أو بقارئ باركود عادي (اكتب الباركود واضغط Enter).
+- فلترة المنتجات حسب القسم.
+- لا يمكن بيع كمية أكبر من المتوفر في المخزون.
+- الدفع **نقدي** أو **دين** (يُسجل الدين تلقائياً باسم الزبون).
+- بعد البيع: إيصال قابل للطباعة أو الإرسال عبر **واتساب** (الأرقام السورية التي تبدأ بـ 09 تُحوّل تلقائياً إلى 963).
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 📦 المنتجات والمخزون
+- إضافة وتعديل وحذف المنتجات (صورة، سعر بيع، سعر تكلفة، قسم، باركود، كمية، حد التنبيه).
+- **المخزون ينقص تلقائياً مع كل عملية بيع**، ويرجع عند إلغاء الفاتورة.
+- زر "مخزون" لإضافة أو إنقاص الكمية بسرعة (استلام بضاعة، تالف...).
+- تنبيه بالمنتجات المنخفضة والنافدة، وقيمة المخزون الإجمالية.
+- منع تكرار الباركود، وتوليد باركود تلقائي.
 
-## Expanding the ESLint configuration
+### 🧾 الفواتير
+- سجل كامل مرتب من الأحدث، مع البحث والفلترة (نقدي / دين).
+- عرض تفاصيل كل فاتورة.
+- **إلغاء الفاتورة**: يرجع الكميات للمخزون ويحذف الدين المرتبط بها.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### 💳 الديون والعملاء
+- تسجيل دين يدوي أو تلقائي من نقطة البيع.
+- تسديد جزئي أو كامل مع عرض المتبقي.
+- إخفاء/إظهار الديون المسددة.
+
+### 📊 التقارير
+- مبيعات وأرباح الشهر الحالي واليوم (الربح = سعر البيع − سعر التكلفة).
+- رسم بياني للمبيعات والأرباح لآخر 14 يوم.
+- الأكثر مبيعاً هذا الشهر، وتنبيهات المخزون.
+- طباعة تقرير شهري ويومي، ومشاركة الملخص عبر واتساب.
+
+## التقنيات
+
+| الجزء | التقنية |
+|---|---|
+| الواجهة | React 19 + Vite |
+| التصميم | Tailwind CSS 4 (نظام ألوان خاص للوضعين الداكن والفاتح) + خط IBM Plex Sans Arabic |
+| قاعدة البيانات | Firebase Firestore |
+| تسجيل الدخول | Firebase Authentication (بريد وكلمة مرور) |
+| الرسوم البيانية | Recharts |
+| مسح الباركود | html5-qrcode |
+| الأيقونات والإشعارات | lucide-react, react-hot-toast |
+
+## التشغيل محلياً
+
+```bash
+npm install
+npm run dev
+```
+
+ثم افتح الرابط الذي يظهر (عادة `http://localhost:5173`).
+
+أوامر أخرى:
+
+```bash
+npm run build     # بناء نسخة الإنتاج في مجلد dist
+npm run preview   # معاينة نسخة الإنتاج
+npm run lint      # فحص الكود
+```
+
+> **ملاحظة:** مسح الباركود بالكاميرا يحتاج اتصال **HTTPS** (أو localhost) وإذن الوصول للكاميرا.
+
+## إعداد Firebase
+
+1. أنشئ مشروعاً على [Firebase Console](https://console.firebase.google.com).
+2. فعّل **Authentication** ← طريقة **Email/Password**.
+3. فعّل **Firestore Database**.
+4. ضع بيانات مشروعك في `src/firebase/config.js`.
+5. انشر قواعد الحماية من الملف [`firestore.rules`](firestore.rules):
+   - إما بنسخها إلى Firestore ← **Rules** ← Publish
+   - أو عبر: `firebase deploy --only firestore:rules`
+
+القواعد تضمن أن كل مستخدم يرى ويعدّل بياناته فقط، وتسمح بتعديل المنتجات (ضروري لإنقاص المخزون عند البيع).
+
+## هيكل البيانات (Firestore)
+
+| المجموعة | أهم الحقول |
+|---|---|
+| `products` | `name`, `sellingPrice`, `costPrice`, `quantity`, `minQuantity`, `category`, `barcode`, `imageUrl`, `userId` |
+| `invoices` | `items[]` (id, name, sellingPrice, costPrice, quantity), `totalAmountUSD`, `totalAmountSYP`, `usdRate`, `paymentType` (`cash`/`debt`), `customerName`, `customerPhone`, `userId`, `createdAt` |
+| `debts` | `customerName`, `customerPhone`, `amountUSD`, `details`, `invoiceId` (إن كان من فاتورة), `userId`, `createdAt` |
+| `users` | `fullName`, `email`, `createdAt` |
+
+عملية البيع تتم داخل **Firestore Transaction** واحدة: التحقق من المخزون ← إنقاص الكميات ← حفظ الفاتورة ← حفظ الدين.
+إما أن تنجح كل الخطوات أو لا يُحفظ أي شيء، فلا يمكن أن يختلف المخزون عن الفواتير.
+
+## هيكل المشروع
+
+```
+src/
+├── App.jsx                     # الهيكل العام: الهيدر، التنقل، الثيم، سعر الصرف
+├── index.css                   # نظام التصميم (الألوان، الأزرار، الحقول، الكروت...)
+├── firebase/config.js          # إعدادات Firebase
+├── services/dbServie.js        # كل التعامل مع Firestore (البيع، الإلغاء، CRUD)
+└── components/
+    ├── AuthScreen.jsx          # تسجيل الدخول وإنشاء حساب
+    ├── POS.jsx                 # نقطة البيع والسلة والإيصال
+    ├── Products.jsx            # المنتجات والمخزون
+    ├── Invoices.jsx            # سجل الفواتير والإلغاء
+    ├── Debts.jsx               # الديون والتسديد
+    ├── Reports.jsx             # التقارير والرسوم البيانية
+    └── BarcodeScannerModal.jsx # ماسح الباركود بالكاميرا
+```
+
+## ملاحظات للاستخدام
+
+- **سعر الصرف** يُعدّل من أعلى الصفحة ويُحفظ على الجهاز، وكل الأسعار تُخزن بالدولار.
+- المنتجات التي أُضيفت بدون كمية يكون مخزونها **0** ولا يمكن بيعها — عبّئ الكمية من زر **"مخزون"**.
+- أضف **سعر التكلفة** لكل منتج حتى تكون أرقام الربح في التقارير دقيقة.
+- يمكن تثبيت التطبيق على الموبايل من المتصفح ("إضافة إلى الشاشة الرئيسية").
+
+</div>

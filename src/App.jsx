@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import {
   ShoppingBag,
   FileText,
@@ -18,12 +18,21 @@ import { signOut, onAuthStateChanged } from 'firebase/auth';
 
 import AuthScreen from './components/AuthScreen';
 import POS from './components/POS';
-import Invoices from './components/Invoices';
-import Products from './components/Products';
-import Debts from './components/Debts';
-import Reports from './components/Reports';
+
+// باقي الصفحات تُحمّل عند الحاجة فقط لتسريع فتح التطبيق
+const Invoices = lazy(() => import('./components/Invoices'));
+const Products = lazy(() => import('./components/Products'));
+const Debts = lazy(() => import('./components/Debts'));
+const Reports = lazy(() => import('./components/Reports'));
+
+const PageLoader = () => (
+  <div className="flex items-center justify-center py-24 text-muted">
+    <Loader className="w-6 h-6 animate-spin text-brand" />
+  </div>
+);
 
 import { getProducts } from './services/dbServie';
+import NumInput from './components/NumInput';
 
 const readStorage = (key, fallback) => {
   try {
@@ -79,16 +88,18 @@ export default function App() {
   }, []);
 
   // جلب المنتجات المفلترة للمستخدم الحالي
-  const loadProducts = useCallback(async () => {
-    if (!currentUser) return;
-    try {
-      const data = await getProducts(currentUser.uid);
-      setProducts(data || []);
-    } catch (error) {
-      console.error('Error fetching products:', error);
-      setProducts([]);
-    }
-  }, [currentUser]);
+  const loadProducts = useCallback(
+    () =>
+      currentUser
+        ? getProducts(currentUser.uid)
+            .then((data) => setProducts(data || []))
+            .catch((error) => {
+              console.error('Error fetching products:', error);
+              setProducts([]);
+            })
+        : Promise.resolve(),
+    [currentUser]
+  );
 
   useEffect(() => {
     if (currentUser) loadProducts();
@@ -168,8 +179,7 @@ export default function App() {
                 title="سعر صرف الدولار"
               >
                 <span className="text-muted hidden sm:inline">$1 =</span>
-                <input
-                  type="number"
+                <NumInput
                   min="1"
                   value={usdRate}
                   onChange={(e) => setUsdRate(Number(e.target.value))}
@@ -229,12 +239,13 @@ export default function App() {
 
       {/* ===== المحتوى ===== */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 sm:py-8">
+        <Suspense fallback={<PageLoader />}>
         <div key={activeTab} className="animate-fadeIn">
           {activeTab === 'pos' && (
             <POS products={products} userId={currentUser.uid} darkMode={darkMode} usdRate={usdRate} onRefresh={loadProducts} />
           )}
           {activeTab === 'invoices' && (
-            <Invoices userId={currentUser.uid} darkMode={darkMode} usdRate={usdRate} />
+            <Invoices userId={currentUser.uid} darkMode={darkMode} usdRate={usdRate} onRefresh={loadProducts} />
           )}
           {activeTab === 'products' && (
             <Products products={products} userId={currentUser.uid} darkMode={darkMode} usdRate={usdRate} onRefresh={loadProducts} />
@@ -246,11 +257,12 @@ export default function App() {
             <Reports userId={currentUser.uid} darkMode={darkMode} usdRate={usdRate} />
           )}
         </div>
+        </Suspense>
       </main>
 
       {/* ===== شريط التنقل السفلي للموبايل ===== */}
       <nav
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-line bg-[color-mix(in_oklab,var(--surface)_90%,transparent)] backdrop-blur-xl pb-[env(safe-area-inset-bottom)]"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-line bg-surface shadow-[0_-8px_24px_-12px_rgb(0_0_0/0.25)] pb-[env(safe-area-inset-bottom)]"
         aria-label="التنقل الرئيسي"
       >
         <div className="grid grid-cols-5">

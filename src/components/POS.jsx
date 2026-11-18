@@ -19,11 +19,23 @@ import {
   Image as ImageIcon,
   PackageX,
   ChevronUp,
+  ScanLine,
 } from 'lucide-react';
+import BarcodeScannerModal from './BarcodeScannerModal';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const stockOf = (p) => Number(p?.quantity ?? 0);
+
+// تحويل الرقم لصيغة دولية تناسب wa.me (افتراضياً سوريا 963)
+const toWhatsAppNumber = (raw) => {
+  let digits = String(raw || '').replace(/[^0-9]/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  else if (digits.startsWith('0')) digits = `963${digits.slice(1)}`;
+  else if (digits.length === 9 && digits.startsWith('9')) digits = `963${digits}`;
+  return digits;
+};
 
 export default function POS({ products = [], userId, usdRate, onRefresh }) {
   const [cart, setCart] = useState([]);
@@ -38,6 +50,7 @@ export default function POS({ products = [], userId, usdRate, onRefresh }) {
   const [showReceipt, setShowReceipt] = useState(false);
   const [completedTransaction, setCompletedTransaction] = useState(null);
 
+  const [scannerOpen, setScannerOpen] = useState(false);
   const cartRef = useRef(null);
 
   const productsById = useMemo(() => Object.fromEntries(products.map((p) => [p.id, p])), [products]);
@@ -109,6 +122,16 @@ export default function POS({ products = [], userId, usdRate, onRefresh }) {
     } else if (filteredProducts.length === 1) {
       addToCart(filteredProducts[0]);
       setSearchTerm('');
+    }
+  };
+
+  const handleScan = (code) => {
+    const product = products.find((p) => p.barcode === code);
+    if (product) {
+      addToCart(product);
+      toast.success(`تمت إضافة "${product.name}"`);
+    } else {
+      toast.error(`لا يوجد منتج بالباركود ${code}`);
     }
   };
 
@@ -192,7 +215,7 @@ export default function POS({ products = [], userId, usdRate, onRefresh }) {
   // ===== واتساب =====
   const sendWhatsAppReceipt = () => {
     if (!completedTransaction) return;
-    const phone = completedTransaction.customerPhone.replace(/[^0-9]/g, '');
+    const phone = toWhatsAppNumber(completedTransaction.customerPhone);
     if (!phone) {
       toast.error('لا يوجد رقم هاتف صحيح لإرسال الفاتورة');
       return;
@@ -215,17 +238,26 @@ export default function POS({ products = [], userId, usdRate, onRefresh }) {
           </div>
         </div>
 
-        <div className="relative">
-          <Search className="field-icon right-4 !w-[18px] !h-[18px]" />
-          <input
-            type="text"
-            placeholder="ابحث بالاسم، الباركود، أو القسم..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            onKeyDown={handleSearchKey}
-            className="field !h-12 !pr-11 !rounded-2xl !bg-surface"
-            autoFocus
-          />
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="field-icon right-4 !w-[18px] !h-[18px]" />
+            <input
+              type="text"
+              placeholder="ابحث بالاسم، الباركود، أو القسم..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={handleSearchKey}
+              className="field !h-12 !pr-11 !rounded-2xl !bg-surface"
+            />
+          </div>
+          <button
+            onClick={() => setScannerOpen(true)}
+            className="btn btn-secondary !h-12 !w-12 sm:!w-auto !px-0 sm:!px-4 !rounded-2xl shrink-0"
+            title="مسح بالكاميرا"
+          >
+            <ScanLine className="w-5 h-5 text-brand" />
+            <span className="hidden sm:inline">مسح</span>
+          </button>
         </div>
 
         {categories.length > 1 && (
@@ -416,6 +448,8 @@ export default function POS({ products = [], userId, usdRate, onRefresh }) {
           </span>
         </button>
       )}
+
+      <BarcodeScannerModal isOpen={scannerOpen} onClose={() => setScannerOpen(false)} onScanSuccess={handleScan} />
 
       {/* ================= الإيصال ================= */}
       {showReceipt && completedTransaction && (

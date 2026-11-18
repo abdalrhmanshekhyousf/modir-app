@@ -1,15 +1,20 @@
 {
   "name": "Modir - نظام المبيعات",
   "short_name": "Modir",
+  "description": "نقطة بيع وإدارة مخزون وديون وتقارير",
+  "lang": "ar",
+  "dir": "rtl",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#09090b",
-  "theme_color": "#10b981",
+  "orientation": "any",
+  "background_color": "#0b0c0b",
+  "theme_color": "#0e8f63",
   "icons": [
     {
       "src": "/modir.svg",
       "sizes": "any",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any"
     }
   ]
 }

@@ -1,7 +1,10 @@
 // src/components/Invoices.jsx
-import { useState, useEffect, useMemo } from 'react';
-import { getInvoices } from '../services/dbServie';
-import { FileText, ChevronDown, Search, Receipt, Banknote, NotebookPen } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { getInvoices, cancelInvoice } from '../services/dbServie';
+import { toast } from 'react-hot-toast';
+import { FileText, ChevronDown, Search, Receipt, Banknote, NotebookPen, Undo2 } from 'lucide-react';
+
+const sortByDateDesc = (list) => (list || []).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
 
@@ -13,28 +16,48 @@ function PayBadge({ type }) {
   );
 }
 
-export default function Invoices({ userId }) {
+export default function Invoices({ userId, onRefresh }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [payFilter, setPayFilter] = useState('all');
+  const [cancellingId, setCancellingId] = useState(null);
+
+  const fetchInvoices = useCallback(
+    () =>
+      getInvoices(userId)
+        .then((data) => setInvoices(sortByDateDesc(data)))
+        .catch((error) => console.error(error))
+        .finally(() => setLoading(false)),
+    [userId]
+  );
 
   useEffect(() => {
-    const fetchInvoices = async () => {
-      if (!userId) return;
-      setLoading(true);
-      try {
-        const data = await getInvoices(userId);
-        setInvoices((data || []).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchInvoices();
-  }, [userId]);
+    if (userId) fetchInvoices();
+  }, [userId, fetchInvoices]);
+
+  const handleCancel = async (inv) => {
+    const msg =
+      inv.paymentType === 'debt'
+        ? 'سيتم إلغاء الفاتورة وإرجاع الكميات للمخزون وحذف الدين المرتبط بها. متابعة؟'
+        : 'سيتم إلغاء الفاتورة وإرجاع الكميات للمخزون. متابعة؟';
+    if (!window.confirm(msg)) return;
+
+    setCancellingId(inv.id);
+    try {
+      await cancelInvoice(inv, userId);
+      toast.success('تم إلغاء الفاتورة وإرجاع المخزون');
+      setOpenId(null);
+      await fetchInvoices();
+      if (onRefresh) onRefresh();
+    } catch (error) {
+      console.error(error);
+      toast.error('تعذر إلغاء الفاتورة');
+    } finally {
+      setCancellingId(null);
+    }
+  };
 
   const filtered = invoices.filter((inv) => {
     const term = searchTerm.trim().toLowerCase();
@@ -179,6 +202,16 @@ export default function Invoices({ userId }) {
                         الهاتف: <span className="num" dir="ltr">{inv.customerPhone}</span>
                       </div>
                     )}
+                  </div>
+                  <div className="flex justify-end mt-3">
+                    <button
+                      onClick={() => handleCancel(inv)}
+                      disabled={cancellingId === inv.id}
+                      className="btn btn-danger-soft btn-sm"
+                    >
+                      <Undo2 className="w-4 h-4" />
+                      {cancellingId === inv.id ? 'جاري الإلغاء...' : 'إلغاء الفاتورة وإرجاع المخزون'}
+                    </button>
                   </div>
                 </div>
               )}

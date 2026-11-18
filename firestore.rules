@@ -1,0 +1,53 @@
+rules_version = '2';
+
+// قواعد الحماية لقاعدة بيانات Modir
+// كل مستخدم يرى ويعدّل بياناته فقط (المرتبطة بحقل userId).
+// للنشر: Firebase Console > Firestore Database > Rules  (أو: firebase deploy --only firestore:rules)
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // المستند الموجود يخص المستخدم الحالي
+    function ownsExisting() {
+      return signedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // المستند الجديد مكتوب باسم المستخدم الحالي
+    function ownsIncoming() {
+      return signedIn() && request.resource.data.userId == request.auth.uid;
+    }
+
+    // ملف المستخدم
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    // المنتجات — التعديل مطلوب لإنقاص المخزون عند البيع وإرجاعه عند إلغاء الفاتورة
+    match /products/{id} {
+      // resource == null: السماح بقراءة منتج محذوف داخل عملية إلغاء الفاتورة (لا يكشف أي بيانات)
+      allow read: if signedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if ownsIncoming();
+      allow update: if ownsExisting() && ownsIncoming();
+      allow delete: if ownsExisting();
+    }
+
+    // الفواتير
+    match /invoices/{id} {
+      allow read: if ownsExisting();
+      allow create: if ownsIncoming();
+      allow update: if ownsExisting() && ownsIncoming();
+      allow delete: if ownsExisting();
+    }
+
+    // الديون
+    match /debts/{id} {
+      allow read: if ownsExisting();
+      allow create: if ownsIncoming();
+      allow update: if ownsExisting() && ownsIncoming();
+      allow delete: if ownsExisting();
+    }
+  }
+}

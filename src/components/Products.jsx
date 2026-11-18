@@ -2,6 +2,7 @@
 import { useMemo, useState } from 'react';
 import { addProduct, updateProduct, deleteProduct } from '../services/dbServie';
 import { toast } from 'react-hot-toast';
+import NumInput from './NumInput';
 import {
   Plus,
   Minus,
@@ -18,7 +19,9 @@ import {
   Search,
   Pencil,
   PackagePlus,
+  ScanLine,
 } from 'lucide-react';
+import BarcodeScannerModal from './BarcodeScannerModal';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
 const newBarcode = () => Math.floor(100000000000 + Math.random() * 900000000000).toString();
@@ -60,6 +63,7 @@ export default function Products({ products = [], userId, usdRate, onRefresh }) 
   // مودال تعديل المخزون السريع
   const [stockTarget, setStockTarget] = useState(null);
   const [stockDelta, setStockDelta] = useState('');
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   const categories = useMemo(() => [...new Set(products.map((p) => p.category || 'عام'))], [products]);
 
@@ -145,6 +149,12 @@ export default function Products({ products = [], userId, usdRate, onRefresh }) 
       quantity: Math.max(0, Math.floor(Number(form.quantity) || 0)),
       minQuantity: Math.max(0, Math.floor(Number(form.minQuantity) || 5)),
     };
+
+    const duplicate = products.find((p) => p.barcode === payload.barcode && p.id !== editingId);
+    if (duplicate) {
+      toast.error(`الباركود مستخدم مسبقاً للمنتج "${duplicate.name}"`);
+      return;
+    }
 
     setLoading(true);
     try {
@@ -389,6 +399,16 @@ export default function Products({ products = [], userId, usdRate, onRefresh }) 
         )}
       </div>
 
+      <BarcodeScannerModal
+        isOpen={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onScanSuccess={(code) => {
+          const existing = products.find((p) => p.barcode === code && p.id !== editingId);
+          if (existing) toast.error(`هذا الباركود مستخدم للمنتج "${existing.name}"`);
+          setForm((f) => ({ ...f, barcode: code }));
+        }}
+      />
+
       {/* ===== مودال تعديل المخزون ===== */}
       {stockTarget && (
         <div className="modal-backdrop" onClick={() => setStockTarget(null)}>
@@ -403,8 +423,7 @@ export default function Products({ products = [], userId, usdRate, onRefresh }) 
             </p>
 
             <label className="label">الكمية</label>
-            <input
-              type="number"
+            <NumInput
               min="1"
               inputMode="numeric"
               placeholder="مثال: 10"
@@ -470,22 +489,22 @@ export default function Products({ products = [], userId, usdRate, onRefresh }) 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">سعر التكلفة ($)</label>
-                  <input type="number" step="0.01" min="0" placeholder="0.00" value={form.costPrice} onChange={setField('costPrice')} className="field num" />
+                  <NumInput step="0.01" min="0" placeholder="0.00" value={form.costPrice} onChange={setField('costPrice')} className="field num" />
                 </div>
                 <div>
                   <label className="label">سعر البيع ($) *</label>
-                  <input type="number" step="0.01" min="0" placeholder="0.00" value={form.sellingPrice} onChange={setField('sellingPrice')} className="field num" required />
+                  <NumInput step="0.01" min="0" placeholder="0.00" value={form.sellingPrice} onChange={setField('sellingPrice')} className="field num" required />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">الكمية المتوفرة</label>
-                  <input type="number" min="0" inputMode="numeric" placeholder="0" value={form.quantity} onChange={setField('quantity')} className="field num" />
+                  <NumInput min="0" inputMode="numeric" placeholder="0" value={form.quantity} onChange={setField('quantity')} className="field num" />
                 </div>
                 <div>
                   <label className="label">تنبيه عند كمية</label>
-                  <input type="number" min="0" inputMode="numeric" placeholder="5" value={form.minQuantity} onChange={setField('minQuantity')} className="field num" />
+                  <NumInput min="0" inputMode="numeric" placeholder="5" value={form.minQuantity} onChange={setField('minQuantity')} className="field num" />
                 </div>
               </div>
 
@@ -516,13 +535,16 @@ export default function Products({ products = [], userId, usdRate, onRefresh }) 
                       placeholder="امسح أو ولّد تلقائياً"
                       value={form.barcode}
                       onChange={setField('barcode')}
-                      className="field font-mono !pl-10"
+                      className="field font-mono placeholder:font-sans !pl-10"
                       dir="ltr"
                     />
                   </div>
-                  <button type="button" onClick={() => setForm((f) => ({ ...f, barcode: newBarcode() }))} className="btn btn-secondary">
+                  <button type="button" onClick={() => setScannerOpen(true)} className="btn btn-secondary btn-icon !w-11 !h-11" title="مسح بالكاميرا">
+                    <ScanLine className="w-4 h-4 text-brand" />
+                  </button>
+                  <button type="button" onClick={() => setForm((f) => ({ ...f, barcode: newBarcode() }))} className="btn btn-secondary btn-icon !w-11 !h-11 sm:!w-auto sm:!px-3.5" title="توليد تلقائي">
                     <Sparkles className="w-4 h-4 text-brand" />
-                    توليد
+                    <span className="hidden sm:inline">توليد</span>
                   </button>
                 </div>
               </div>
